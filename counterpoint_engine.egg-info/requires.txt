@@ -1,0 +1,5 @@
+constraint-theory-core
+flux-tensor-midi
+
+[dev]
+pytest>=7.0
