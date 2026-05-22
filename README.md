@@ -33,7 +33,7 @@ gen = CounterpointGenerator(
 
 counterpoint = gen.generate()
 print(counterpoint)
-# → [55, 57, 59, 60, 62, 64, 65, 67]
+# → [48, 53, 52, 50, 48, 48, 50, 48]
 
 # Multi-voice — Laman graph guarantees independence
 voices = gen.generate_n_voices(n_voices=4)
@@ -214,9 +214,9 @@ pytest
 
 ## Status
 
-![Tests](https://img.shields.io/badge/tests-73%2F78-passing-yellow) ![Version](https://img.shields.io/badge/version-0.1.0-blue) ![License](https://img.shields.io/badge/license-Apache%202.0-green)
+![Tests](https://img.shields.io/badge/tests-78%2F78-passing-brightgreen) ![Version](https://img.shields.io/badge/version-0.1.0-blue) ![License](https://img.shields.io/badge/license-Apache%202.0-green)
 
-73 of 78 tests pass. 5 multi-voice edge cases fail (complex Laman graph interactions under backtracking).
+All 78 tests pass.
 
 ## License
 
