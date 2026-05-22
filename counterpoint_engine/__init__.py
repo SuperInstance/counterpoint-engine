@@ -17,6 +17,7 @@ from .rules import (
     voice_independence,
     SAT,
     UNSAT,
+    Satisfiability,
 )
 from .laman_counterpoint import (
     CounterpointGraph,
@@ -25,6 +26,7 @@ from .laman_counterpoint import (
 )
 from .generator import (
     CounterpointGenerator,
+    CounterpointResult,
     Species,
 )
 from .tensor_output import (
@@ -45,12 +47,14 @@ __all__ = [
     "voice_independence",
     "SAT",
     "UNSAT",
+    "Satisfiability",
     # Laman
     "CounterpointGraph",
     "henneberg_construct",
     "verify_rigidity",
     # Generator
     "CounterpointGenerator",
+    "CounterpointResult",
     "Species",
     # Tensor output
     "TensorMIDIEvent",

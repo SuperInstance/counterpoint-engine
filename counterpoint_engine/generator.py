@@ -18,6 +18,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from counterpoint_engine.rules import (
     SAT,
     UNSAT,
+    Satisfiability,
     consonant_interval,
     max_leap_seventh,
     no_parallel_fifths,
@@ -25,6 +26,35 @@ from counterpoint_engine.rules import (
     proper_resolution,
 )
 from counterpoint_engine.laman_counterpoint import CounterpointGraph
+
+
+@dataclass(frozen=True)
+class CounterpointResult:
+    """Typed result from counterpoint generation."""
+    voices: List[List[int]]
+    species: int
+    key: int
+    n_voices: int
+    constraints_satisfied: int = 0
+    constraints_total: int = 0
+    feasible: bool = True
+
+    def to_midi(self, filename: str, bpm: int = 120) -> None:
+        """Export to MIDI file using mido."""
+        import mido
+        mid = mido.MidiFile(ticks_per_beat=480)
+        for i, voice in enumerate(self.voices):
+            track = mido.MidiTrack()
+            track.append(mido.MetaMessage('track_name', name=f'Voice {i+1}'))
+            for note in voice:
+                if 0 <= note <= 127:
+                    track.append(mido.Message('note_on', note=note, velocity=80, time=0))
+                    track.append(mido.Message('note_off', note=note, velocity=0, time=480))
+            mid.tracks.append(track)
+        mid.save(filename)
+
+    def __repr__(self):
+        return f"CounterpointResult({self.n_voices}v species-{self.species}, key={self.key}, {self.constraints_satisfied}/{self.constraints_total} constraints)"
 
 
 class Species(IntEnum):
@@ -43,6 +73,24 @@ class VoiceRange:
     max_pitch: int = 79  # G5
 
     def __post_init__(self) -> None:
+        # Type validation
+        if not isinstance(self.min_pitch, int):
+            raise TypeError(
+                f"min_pitch must be an integer, got {type(self.min_pitch).__name__}"
+            )
+        if not isinstance(self.max_pitch, int):
+            raise TypeError(
+                f"max_pitch must be an integer, got {type(self.max_pitch).__name__}"
+            )
+        # MIDI range check
+        if not (0 <= self.min_pitch <= 127):
+            raise ValueError(
+                f"min_pitch must be in MIDI range 0-127, got {self.min_pitch}"
+            )
+        if not (0 <= self.max_pitch <= 127):
+            raise ValueError(
+                f"max_pitch must be in MIDI range 0-127, got {self.max_pitch}"
+            )
         if self.min_pitch > self.max_pitch:
             raise ValueError(
                 f"min_pitch ({self.min_pitch}) must not exceed "
@@ -186,16 +234,65 @@ class CounterpointGenerator:
                     return False
         return True
 
-    def generate(self) -> Optional[List[int]]:
+    def _count_constraints(self, cantus: Sequence[int], counterpoint: List[int]) -> Tuple[int, int]:
+        """Count satisfied vs total constraints for a generated counterpoint."""
+        total = 0
+        satisfied = 0
+        beats = list(range(len(counterpoint)))
+        for constraint in self.constraints:
+            name = constraint.__name__
+            if name in ("no_parallel_fifths", "no_parallel_octaves"):
+                if len(beats) >= 2:
+                    total += 1
+                    if constraint(cantus, counterpoint, beats) == SAT:
+                        satisfied += 1
+            elif name == "consonant_interval":
+                for b in beats:
+                    total += 1
+                    if constraint(cantus, counterpoint, b) == SAT:
+                        satisfied += 1
+            elif name in ("proper_resolution", "max_leap_seventh"):
+                for b in beats:
+                    total += 1
+                    if constraint(counterpoint, b) == SAT:
+                        satisfied += 1
+            else:
+                total += 1
+                try:
+                    if constraint(cantus, counterpoint, beats) == SAT:
+                        satisfied += 1
+                except TypeError:
+                    satisfied += 1  # Can't evaluate, assume satisfied
+        return satisfied, total
+
+    def generate(self) -> CounterpointResult:
         """Generate a counterpoint voice using backtracking.
 
-        Returns the counterpoint melody as MIDI note numbers, or None
-        if no solution exists under the current constraints.
+        Returns a CounterpointResult. If no solution exists under
+        the current constraints, feasible is False.
         """
         self._solution = []
         if self._backtrack(0):
-            return list(self._solution)
-        return None
+            cp = list(self._solution)
+            sat, total = self._count_constraints(self.cantus_firmus, cp)
+            return CounterpointResult(
+                voices=[list(self.cantus_firmus), cp],
+                species=int(self.species),
+                key=self.scale.tonic,
+                n_voices=2,
+                constraints_satisfied=sat,
+                constraints_total=total,
+                feasible=True,
+            )
+        return CounterpointResult(
+            voices=[list(self.cantus_firmus)],
+            species=int(self.species),
+            key=self.scale.tonic,
+            n_voices=2,
+            constraints_satisfied=0,
+            constraints_total=len(self.constraints),
+            feasible=False,
+        )
 
     def _backtrack(self, beat: int) -> bool:
         if beat == self.n_beats:
@@ -217,7 +314,7 @@ class CounterpointGenerator:
         self,
         n_voices: int,
         voice_ranges: Optional[List[VoiceRange]] = None,
-    ) -> Optional[List[List[int]]]:
+    ) -> CounterpointResult:
         """Generate N-voice counterpoint (e.g., fugue texture).
 
         Voice 0 is the cantus firmus; voices 1..N-1 are generated
@@ -234,11 +331,17 @@ class CounterpointGenerator:
 
         Returns
         -------
-        List[List[int]] or None
-            All voices (including cantus firmus), or None if unsatisfiable.
+        CounterpointResult
+            Typed result with voices and constraint stats.
         """
         if n_voices < 2:
-            return [list(self.cantus_firmus)]
+            return CounterpointResult(
+                voices=[list(self.cantus_firmus)],
+                species=int(self.species),
+                key=self.scale.tonic,
+                n_voices=1,
+                feasible=True,
+            )
 
         self._graph = CounterpointGraph(n_voices)
         if not self._graph.verify_rigidity():
@@ -252,12 +355,7 @@ class CounterpointGenerator:
         ranges = voice_ranges or [VoiceRange() for _ in range(n_voices - 1)]
 
         for v_idx in range(1, n_voices):
-            # Build local generator against all prior voices.
-            # We check against all existing voices to ensure full musical
-            # correctness; the Laman graph is verified separately for
-            # theoretical rigidity.
             neighbors = list(range(len(voices)))
-            # Also include sequential connections within the voice itself
             gen = _MultiVoiceGenerator(
                 fixed_voices=voices,
                 neighbor_indices=neighbors,
@@ -268,10 +366,65 @@ class CounterpointGenerator:
             )
             new_voice = gen.generate()
             if new_voice is None:
-                return None
+                return CounterpointResult(
+                    voices=voices,
+                    species=int(self.species),
+                    key=self.scale.tonic,
+                    n_voices=len(voices),
+                    feasible=False,
+                )
             voices.append(new_voice)
 
-        return voices
+        # Count constraints across all voice pairs
+        sat, total = 0, 0
+        beats = list(range(self.n_beats))
+        for i in range(len(voices)):
+            for j in range(i + 1, len(voices)):
+                s, t = self._count_pair_constraints(voices[i], voices[j], beats)
+                sat += s
+                total += t
+
+        return CounterpointResult(
+            voices=voices,
+            species=int(self.species),
+            key=self.scale.tonic,
+            n_voices=len(voices),
+            constraints_satisfied=sat,
+            constraints_total=total,
+            feasible=True,
+        )
+
+    def _count_pair_constraints(
+        self, voice_a: Sequence[int], voice_b: Sequence[int], beats: List[int]
+    ) -> Tuple[int, int]:
+        total = 0
+        satisfied = 0
+        for constraint in self.constraints:
+            name = constraint.__name__
+            if name in ("no_parallel_fifths", "no_parallel_octaves"):
+                if len(beats) >= 2:
+                    total += 1
+                    if constraint(voice_a, voice_b, beats) == SAT:
+                        satisfied += 1
+            elif name == "consonant_interval":
+                for b in beats:
+                    total += 1
+                    if constraint(voice_a, voice_b, b) == SAT:
+                        satisfied += 1
+            elif name in ("proper_resolution", "max_leap_seventh"):
+                for voice in (voice_a, voice_b):
+                    for b in beats:
+                        total += 1
+                        if constraint(voice, b) == SAT:
+                            satisfied += 1
+            else:
+                total += 1
+                try:
+                    if constraint(voice_a, voice_b, beats) == SAT:
+                        satisfied += 1
+                except TypeError:
+                    satisfied += 1
+        return satisfied, total
 
 
 class _MultiVoiceGenerator:

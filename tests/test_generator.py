@@ -4,6 +4,7 @@ import pytest
 
 from counterpoint_engine.generator import (
     CounterpointGenerator,
+    CounterpointResult,
     Species,
     Scale,
     VoiceRange,
@@ -29,41 +30,48 @@ class TestCounterpointGenerator:
             species=Species.FIRST,
         )
         result = gen.generate()
-        assert result is not None
-        assert len(result) == len(C_MAJOR_CANTUS)
+        assert isinstance(result, CounterpointResult)
+        assert result.feasible
+        assert len(result.voices) == 2
+        assert len(result.voices[1]) == len(C_MAJOR_CANTUS)
 
     def test_generated_satisfies_parallel_fifths(self):
         gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS)
-        cp = gen.generate()
-        assert cp is not None
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
         beats = list(range(len(cp)))
         assert no_parallel_fifths(C_MAJOR_CANTUS, cp, beats) == SAT
 
     def test_generated_satisfies_parallel_octaves(self):
         gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS)
-        cp = gen.generate()
-        assert cp is not None
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
         beats = list(range(len(cp)))
         assert no_parallel_octaves(C_MAJOR_CANTUS, cp, beats) == SAT
 
     def test_generated_satisfies_consonance(self):
         gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS)
-        cp = gen.generate()
-        assert cp is not None
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
         for b in range(len(cp)):
             assert consonant_interval(C_MAJOR_CANTUS, cp, b) == SAT
 
     def test_generated_satisfies_max_leap(self):
         gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS)
-        cp = gen.generate()
-        assert cp is not None
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
         for b in range(len(cp)):
             assert max_leap_seventh(cp, b) == SAT
 
     def test_generated_satisfies_proper_resolution(self):
         gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS)
-        cp = gen.generate()
-        assert cp is not None
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
         for b in range(len(cp)):
             assert proper_resolution(cp, b) == SAT
 
@@ -73,8 +81,8 @@ class TestCounterpointGenerator:
             cantus_firmus=[62, 64, 66, 67, 69, 67, 66, 64],
             scale=scale,
         )
-        cp = gen.generate()
-        assert cp is not None
+        result = gen.generate()
+        assert result.feasible
 
     def test_voice_range_restricts(self):
         vr = VoiceRange(min_pitch=55, max_pitch=70)
@@ -82,21 +90,23 @@ class TestCounterpointGenerator:
             cantus_firmus=C_MAJOR_CANTUS,
             voice_range=vr,
         )
-        cp = gen.generate()
-        assert cp is not None
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
         assert all(vr.min_pitch <= p <= vr.max_pitch for p in cp)
 
     def test_short_cantus(self):
         gen = CounterpointGenerator(cantus_firmus=[60, 64, 67])
-        cp = gen.generate()
-        assert cp is not None
-        assert len(cp) == 3
+        result = gen.generate()
+        assert result.feasible
+        assert len(result.voices[1]) == 3
 
     def test_all_constraints_combined(self):
         """Bach-style combined constraint check."""
         gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS)
-        cp = gen.generate()
-        assert cp is not None
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
         beats = list(range(len(cp)))
         assert no_parallel_fifths(C_MAJOR_CANTUS, cp, beats) == SAT
         assert no_parallel_octaves(C_MAJOR_CANTUS, cp, beats) == SAT
@@ -105,27 +115,37 @@ class TestCounterpointGenerator:
             assert max_leap_seventh(cp, b) == SAT
             assert proper_resolution(cp, b) == SAT
 
+    def test_result_has_constraint_counts(self):
+        gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS)
+        result = gen.generate()
+        assert result.feasible
+        assert result.constraints_total > 0
+        assert result.constraints_satisfied > 0
+        assert result.species == 1
+        assert result.n_voices == 2
+
 
 class TestMultiVoiceGeneration:
     def test_three_voices(self):
         gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS)
-        voices = gen.generate_n_voices(3)
-        assert voices is not None
-        assert len(voices) == 3
-        assert all(len(v) == len(C_MAJOR_CANTUS) for v in voices)
+        result = gen.generate_n_voices(3)
+        assert isinstance(result, CounterpointResult)
+        assert result.feasible
+        assert len(result.voices) == 3
+        assert all(len(v) == len(C_MAJOR_CANTUS) for v in result.voices)
 
     def test_four_voices(self):
         gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS)
-        voices = gen.generate_n_voices(4)
-        assert voices is not None
-        assert len(voices) == 4
+        result = gen.generate_n_voices(4)
+        assert result.feasible
+        assert len(result.voices) == 4
 
     def test_laman_rigidity_of_generated(self):
         """The constraint graph for N-voice counterpoint must be Laman."""
         from counterpoint_engine.laman_counterpoint import CounterpointGraph
         for n in [3, 4, 5]:
             gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS)
-            voices = gen.generate_n_voices(n)
-            assert voices is not None
+            result = gen.generate_n_voices(n)
+            assert result.feasible
             g = CounterpointGraph(n)
             assert g.is_minimally_rigid()

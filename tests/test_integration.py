@@ -2,7 +2,7 @@
 
 import pytest
 
-from counterpoint_engine.generator import CounterpointGenerator, Species
+from counterpoint_engine.generator import CounterpointGenerator, CounterpointResult, Species
 from counterpoint_engine.laman_counterpoint import CounterpointGraph
 from counterpoint_engine.tensor_output import (
     voices_to_tensor_events,
@@ -27,18 +27,21 @@ class TestFullPipeline:
     def test_generate_2_voice_and_output(self):
         """Generate 2-voice counterpoint and convert to tensor-midi."""
         gen = CounterpointGenerator(cantus_firmus=BACH_CANTUS)
-        cp = gen.generate()
-        assert cp is not None
+        result = gen.generate()
+        assert isinstance(result, CounterpointResult)
+        assert result.feasible
 
-        voices = [BACH_CANTUS, cp]
+        voices = result.voices
         tensor_events, midi_events = voices_to_tensor_events(voices)
         assert len(tensor_events) == len(midi_events) == len(BACH_CANTUS) * 2
 
     def test_generate_4_voice_fugue_excerpt(self):
         """Generate a 4-voice fugue excerpt and verify all properties."""
         gen = CounterpointGenerator(cantus_firmus=BACH_CANTUS)
-        voices = gen.generate_n_voices(4)
-        assert voices is not None
+        result = gen.generate_n_voices(4)
+        assert isinstance(result, CounterpointResult)
+        assert result.feasible
+        voices = result.voices
         assert len(voices) == 4
         assert all(len(v) == len(BACH_CANTUS) for v in voices)
 
@@ -88,8 +91,8 @@ class TestFullPipeline:
         """Verify Laman rigidity holds for 2 through 8 voices."""
         for n in range(2, 9):
             gen = CounterpointGenerator(cantus_firmus=BACH_CANTUS)
-            voices = gen.generate_n_voices(n)
-            if voices is None:
+            result = gen.generate_n_voices(n)
+            if not result.feasible:
                 continue  # Some N may be unsatisfiable with strict rules
             g = CounterpointGraph(n)
             assert g.edge_count() == 2 * n - 3

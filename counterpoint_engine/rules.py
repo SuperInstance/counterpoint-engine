@@ -15,16 +15,23 @@ The rules encode the classical species counterpoint constraints:
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import List, Sequence, Tuple
 
 from constraint_theory_core.rigidity import is_laman
 
 # ---------------------------------------------------------------------------
-# FLUX result literals
+# FLUX result type
 # ---------------------------------------------------------------------------
 
-SAT: str = "SAT"
-UNSAT: str = "UNSAT"
+class Satisfiability(str, Enum):
+    """Satisfiability result for constraint checking."""
+    SAT = "SAT"
+    UNSAT = "UNSAT"
+    UNKNOWN = "UNKNOWN"
+
+SAT: Satisfiability = Satisfiability.SAT
+UNSAT: Satisfiability = Satisfiability.UNSAT
 
 # ---------------------------------------------------------------------------
 # Musical constants
