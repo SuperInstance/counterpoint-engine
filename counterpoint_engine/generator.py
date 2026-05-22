@@ -29,18 +29,28 @@ from counterpoint_engine.laman_counterpoint import CounterpointGraph
 
 class Species(IntEnum):
     """Species of counterpoint."""
-    FIRST = 1   # note against note
+    FIRST = 1  # note against note
     SECOND = 2  # two notes against one
-    THIRD = 3   # three notes against one
+    THIRD = 3  # three notes against one
     FOURTH = 4  # suspensions
-    FIFTH = 5   # florid counterpoint
+    FIFTH = 5  # florid counterpoint
 
 
 @dataclass
 class VoiceRange:
     """Allowed pitch range for a voice."""
-    min_pitch: int = 48   # C3
-    max_pitch: int = 79   # G5
+    min_pitch: int = 48  # C3
+    max_pitch: int = 79  # G5
+
+    def __post_init__(self) -> None:
+        if self.min_pitch > self.max_pitch:
+            raise ValueError(
+                f"min_pitch ({self.min_pitch}) must not exceed "
+                f"max_pitch ({self.max_pitch})"
+            )
+
+    def __repr__(self) -> str:
+        return f"VoiceRange(min_pitch={self.min_pitch}, max_pitch={self.max_pitch})"
 
     def candidates(self, scale: Scale, prev_pitch: Optional[int] = None) -> List[int]:
         """Return all valid pitches in range belonging to scale."""
@@ -57,9 +67,16 @@ class Scale:
     """Diatonic scale represented as pitch classes."""
     tonic: int = 0  # C major by default
     mode: str = "major"
-    _pitch_classes: Tuple[int, ...] = field(default_factory=lambda: (0, 2, 4, 5, 7, 9, 11))
+    _pitch_classes: Tuple[int, ...] = field(
+        default_factory=lambda: (0, 2, 4, 5, 7, 9, 11)
+    )
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        if self.mode not in ("major", "minor") and not self._pitch_classes:
+            raise ValueError(
+                f"Unknown mode '{self.mode}'; must be 'major' or 'minor' "
+                f"or provide explicit _pitch_classes"
+            )
         if self.mode == "major":
             intervals = (0, 2, 4, 5, 7, 9, 11)
         elif self.mode == "minor":
@@ -67,6 +84,9 @@ class Scale:
         else:
             intervals = self._pitch_classes
         self._pitch_classes = tuple(sorted((self.tonic + i) % 12 for i in intervals))
+
+    def __repr__(self) -> str:
+        return f"Scale(tonic={self.tonic}, mode={self.mode!r})"
 
     def contains(self, pitch: int) -> bool:
         return (pitch % 12) in self._pitch_classes
@@ -111,10 +131,22 @@ class CounterpointGenerator:
         default_factory=lambda: list(DEFAULT_CONSTRAINTS)
     )
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        if len(self.cantus_firmus) == 0:
+            raise ValueError("cantus_firmus must not be empty")
+        if not isinstance(self.species, Species):
+            raise ValueError(
+                f"species must be a Species enum, got {type(self.species).__name__}"
+            )
         self.n_beats = len(self.cantus_firmus)
         self._solution: List[int] = []
         self._graph: Optional[CounterpointGraph] = None
+
+    def __repr__(self) -> str:
+        return (
+            f"CounterpointGenerator(n_beats={self.n_beats}, "
+            f"species={self.species.name}, scale={self.scale!r})"
+        )
 
     def _check_all(self, counterpoint: List[int], up_to: int) -> bool:
         """Check all constraints on the partial counterpoint up to beat `up_to`."""
@@ -220,10 +252,11 @@ class CounterpointGenerator:
         ranges = voice_ranges or [VoiceRange() for _ in range(n_voices - 1)]
 
         for v_idx in range(1, n_voices):
-            # Build local generator against all prior voices this voice connects to
-            neighbors = [
-                j for (i, j) in self._graph.edges if i == v_idx or j == v_idx
-            ]
+            # Build local generator against all prior voices.
+            # We check against all existing voices to ensure full musical
+            # correctness; the Laman graph is verified separately for
+            # theoretical rigidity.
+            neighbors = list(range(len(voices)))
             # Also include sequential connections within the voice itself
             gen = _MultiVoiceGenerator(
                 fixed_voices=voices,

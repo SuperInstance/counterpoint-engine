@@ -35,7 +35,11 @@ class CounterpointGraph:
     edges: List[Tuple[int, int]] = field(default_factory=list)
     constraints: Dict[Tuple[int, int], List[str]] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        if self.n_voices < 2:
+            raise ValueError(
+                f"n_voices must be at least 2, got {self.n_voices}"
+            )
         if not self.edges and self.n_voices >= 2:
             self.edges = _core_henneberg_construct(self.n_voices)
         if not self.constraints:

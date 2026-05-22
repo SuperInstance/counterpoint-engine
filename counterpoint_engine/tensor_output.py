@@ -53,7 +53,7 @@ class TensorMIDIEvent:
     beat_k: int
     state_byte: int
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Saturate to INT8 range
         object.__setattr__(
             self, "cos_int8", max(-128, min(127, self.cos_int8))
@@ -84,7 +84,7 @@ class TensorMIDIEvent:
         interval: int,
         beat: int,
         side_state: int = 0,
-    ) -> "TensorMIDIEvent":
+    ) -> TensorMIDIEvent:
         """Create a TensorMIDIEvent from pitch and interval.
 
         The interval determines the phase direction via the A₂ lattice.
@@ -135,7 +135,12 @@ def voices_to_tensor_events(
     tensor_events: List[TensorMIDIEvent] = []
     midi_events: List[MidiEvent] = []
 
-    n_beats = len(voices[0]) if voices else 0
+    if not voices:
+        return [], []
+
+    n_beats = len(voices[0])
+    if not all(len(v) == n_beats for v in voices):
+        raise ValueError("All voices must have the same length")
 
     for beat in range(n_beats):
         start_ms = beat * beat_duration_ms
@@ -295,6 +300,8 @@ def voice_intervals_to_flux_vectors(
     """
     if not voices:
         return []
+    if beat < 0 or beat >= len(voices[0]):
+        raise IndexError(f"beat {beat} out of range for voice length {len(voices[0])}")
     bass = voices[0][beat]
     vectors: List[FluxVector] = []
     for voice in voices:

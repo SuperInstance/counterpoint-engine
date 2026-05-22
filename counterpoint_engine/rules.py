@@ -30,8 +30,8 @@ UNSAT: str = "UNSAT"
 # Musical constants
 # ---------------------------------------------------------------------------
 
-PERFECT_FIFTH: int = 7      # semitones between pitch classes
-PERFECT_OCTAVE: int = 12    # semitones
+PERFECT_FIFTH: int = 7  # semitones between pitch classes
+PERFECT_OCTAVE: int = 12  # semitones
 MAJOR_SIXTH: int = 9
 MINOR_SIXTH: int = 8
 MAJOR_THIRD: int = 4
@@ -61,7 +61,7 @@ DISSONANT_INTERVALS: Tuple[int, ...] = (
 )
 
 LEADING_TONE: int = 11  # pitch class of leading tone (B in C major)
-TONIC: int = 0          # pitch class of tonic (C in C major)
+TONIC: int = 0  # pitch class of tonic (C in C major)
 
 
 # ---------------------------------------------------------------------------
