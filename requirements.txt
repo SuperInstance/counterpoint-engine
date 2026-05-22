@@ -1,0 +1,4 @@
+# counterpoint-engine
+constraint-theory-core
+flux-tensor-midi
+pytest>=7.0
