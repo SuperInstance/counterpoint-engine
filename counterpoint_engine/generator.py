@@ -524,14 +524,53 @@ class CounterpointGenerator:
 
         Creates suspension chains:
         preparation (consonant) → suspension (dissonant) → resolution (consonant, step down)
+
+        Two-pass approach:
+        1. Generate consonant frameworks with varying range
+        2. Insert suspensions by modifying preparation beats
+        3. Pick the best result combining suspensions and range
         """
-        self._solution = []
         cf = list(self.cantus_firmus)
-        if self._backtrack_species4(0):
-            cp = list(self._solution)
-            sat, total = self._count_species4_constraints(cf, cp)
+
+        best_solution = None
+        best_score = -1
+
+        # Collect all valid starting pitches
+        start_pitches = []
+        for p in range(self.voice_range.max_pitch, self.voice_range.min_pitch - 1, -1):
+            if not self.scale.contains(p):
+                continue
+            intv = abs(p - cf[0]) % 12
+            if consonant_interval_class(intv) and intv != 0:
+                start_pitches.append(p)
+
+        for start in start_pitches[:25]:
+            self._solution = [start]
+            if self._species4_backtrack_framework(cf, 1):
+                framework = list(self._solution)
+                # Try inserting suspensions into this framework
+                with_susp = self._species4_insert_suspensions(cf, framework)
+                susp_count = sum(
+                    1 for b in range(len(with_susp))
+                    if not consonant_interval_class(abs(with_susp[b] - cf[b]) % 12)
+                )
+                span = max(with_susp) - min(with_susp)
+                unique = len(set(with_susp))
+
+                # Ideal: suspensions + wide range
+                if susp_count >= 1 and span >= 12:
+                    best_solution = with_susp
+                    break
+
+                score = susp_count * 1000 + span * 10 + unique
+                if score > best_score:
+                    best_score = score
+                    best_solution = with_susp
+
+        if best_solution is not None:
+            sat, total = self._count_species4_constraints(cf, best_solution)
             return CounterpointResult(
-                voices=[cf, cp],
+                voices=[cf, best_solution],
                 species=4,
                 key=self.scale.tonic,
                 n_voices=2,
@@ -541,67 +580,193 @@ class CounterpointGenerator:
             )
         return self._infeasible_result()
 
-    def _backtrack_species4(self, beat: int) -> bool:
+    def _species4_find_framework(self, cf: List[int]) -> Optional[List[int]]:
+        """Find a consonant melodic framework with wide range.
+
+        Strategy: build an arc-shaped melody that goes high then low
+        (or vice versa) to span a wide range, ensuring consonance at every beat.
+        """
+        best = None
+        best_score = -1
+
+        # Collect all valid starting pitches
+        start_pitches = []
+        for p in range(self.voice_range.max_pitch, self.voice_range.min_pitch - 1, -1):
+            if not self.scale.contains(p):
+                continue
+            intv = abs(p - cf[0]) % 12
+            if consonant_interval_class(intv) and intv != 0:
+                start_pitches.append(p)
+
+        # Also collect ending pitches for the last CF note
+        end_targets = []
+        for p in range(self.voice_range.min_pitch, self.voice_range.max_pitch + 1):
+            if not self.scale.contains(p):
+                continue
+            intv = abs(p - cf[-1]) % 12
+            if consonant_interval_class(intv) and intv != 0:
+                end_targets.append(p)
+
+        for start in start_pitches[:15]:
+            # Plan a target arc: aim for a pitch far from start on the last beat
+            for end_pitch in end_targets:
+                if abs(end_pitch - start) < 12:
+                    continue  # skip if not enough span potential
+                self._solution = [start]
+                self._s4_target_end = end_pitch
+                if self._species4_backtrack_framework(cf, 1):
+                    cp = list(self._solution)
+                    span = max(cp) - min(cp)
+                    unique = len(set(cp))
+                    score = span * 10 + unique * 50
+                    if score > best_score:
+                        best_score = score
+                        best = cp
+                    if span >= 12 and unique >= 4:
+                        return best
+
+        # Fallback: no arc target, just search normally
+        for start in start_pitches[:15]:
+            self._solution = [start]
+            self._s4_target_end = None
+            if self._species4_backtrack_framework(cf, 1):
+                cp = list(self._solution)
+                span = max(cp) - min(cp)
+                unique = len(set(cp))
+                score = span * 10 + unique * 50
+                if score > best_score:
+                    best_score = score
+                    best = cp
+
+        return best
+
+    def _species4_backtrack_framework(self, cf: List[int], beat: int) -> bool:
+        """Backtrack to find consonant framework, optionally steering toward target."""
         if beat == self.n_beats:
             return True
 
-        cf_note = self.cantus_firmus[beat]
-        prev_pitch = self._solution[beat - 1] if beat > 0 else None
-        candidates = self.voice_range.candidates(self.scale, prev_pitch)
+        cf_note = cf[beat]
+        prev_pitch = self._solution[beat - 1]
+        candidates = self._consonant_candidates(cf_note, prev_pitch)
 
-        for pitch in candidates:
+        # If we have a target end pitch, steer toward it
+        target = getattr(self, '_s4_target_end', None)
+        if target is not None and beat >= self.n_beats - 2:
+            candidates.sort(key=lambda p: abs(p - target))
+        elif target is not None:
+            remaining = self.n_beats - beat
+            if remaining > 0:
+                ideal_step = (target - prev_pitch) / remaining
+                candidates.sort(key=lambda p: abs((p - prev_pitch) - ideal_step))
+
+        moved = [p for p in candidates if p != prev_pitch]
+        static = [p for p in candidates if p == prev_pitch]
+        ordered = moved + static
+
+        for pitch in ordered:
+            if abs(pitch - prev_pitch) > 10 and abs(pitch - prev_pitch) % 12 != 0:
+                continue
             self._solution.append(pitch)
-
-            if beat == 0:
-                # First note must be consonant (preparation)
-                intv = abs(pitch - cf_note) % 12
-                if not consonant_interval_class(intv):
-                    self._solution.pop()
-                    continue
-                if self._backtrack_species4(beat + 1):
-                    return True
-            elif beat == self.n_beats - 1:
-                # Last note: must resolve properly
-                intv = abs(pitch - cf_note) % 12
-                # Either consonant or resolution of suspension
-                if consonant_interval_class(intv):
-                    if self._backtrack_species4(beat + 1):
-                        return True
-                # Check if this is a resolution (step down from prev)
-                elif is_step(pitch, self._solution[beat - 1]) and pitch < self._solution[beat - 1]:
-                    if self._backtrack_species4(beat + 1):
-                        return True
-            else:
-                # Middle beats: can be consonant (preparation/normal)
-                # or dissonant (suspension) — but if dissonant, prev must be consonant prep
-                intv = abs(pitch - cf_note) % 12
-                if consonant_interval_class(intv):
-                    # Consonant — either normal or preparation for next suspension
-                    if self._check_melodic(pitch):
-                        if self._backtrack_species4(beat + 1):
-                            return True
-                else:
-                    # Dissonant — must be a suspension (prev was consonant prep, resolves step down)
-                    prev_cf = self.cantus_firmus[beat - 1]
-                    prev_intv = abs(self._solution[beat - 1] - prev_cf) % 12
-                    if consonant_interval_class(prev_intv):
-                        # Previous was consonant (preparation) — this is suspension
-                        # Next must resolve — we'll check on next beat
-                        if self._check_melodic(pitch):
-                            if self._backtrack_species4(beat + 1):
-                                return True
+            if self._species4_backtrack_framework(cf, beat + 1):
+                return True
             self._solution.pop()
         return False
 
-    def _check_melodic(self, pitch: int) -> bool:
-        """Check melodic constraints for the current note."""
-        if len(self._solution) < 2:
-            return True
-        prev = self._solution[-2]
-        leap = abs(pitch - prev)
-        if leap > 10 and leap % 12 != 0:
-            return False
-        return True
+    def _species4_insert_suspensions(self, cf: List[int], cp: List[int]) -> List[int]:
+        """Insert suspensions into a consonant framework.
+
+        For each possible 3-beat window [b, b+1, b+2], find a pitch P where:
+        - P is consonant with cf[b] (preparation)
+        - P is dissonant with cf[b+1] (suspension)
+        - P-step is consonant with cf[b+2] (resolution)
+
+        Prefer P close to the existing cp[b] to maintain the framework's range.
+        """
+        result = list(cp)
+        n = len(cf)
+
+        # Find all possible suspension chains
+        chains = []  # list of (prep_beat, pitch, susp_beat, res_pitch, res_beat)
+        for b in range(n - 2):
+            for p in range(self.voice_range.min_pitch, self.voice_range.max_pitch + 1):
+                if not self.scale.contains(p):
+                    continue
+                # Preparation: consonant with cf[b]
+                if not consonant_interval_class(abs(p - cf[b]) % 12):
+                    continue
+                # Suspension: dissonant with cf[b+1]
+                if consonant_interval_class(abs(p - cf[b + 1]) % 12):
+                    continue
+                # Resolution: step down to consonance with cf[b+2]
+                for step in [1, 2]:
+                    res = p - step
+                    if not (self.voice_range.min_pitch <= res <= self.voice_range.max_pitch):
+                        continue
+                    if not self.scale.contains(res):
+                        continue
+                    if consonant_interval_class(abs(res - cf[b + 2]) % 12):
+                        # Check that resolution interval isn't unison (boring)
+                        res_intv = abs(res - cf[b + 2]) % 12
+                        # Valid chain found
+                        dist = abs(p - cp[b])  # how far from framework
+                        chains.append((b, p, b + 1, res, b + 2, dist))
+                        break  # take first valid step
+
+        # Sort by distance from framework (prefer minimal changes)
+        chains.sort(key=lambda c: c[5])
+
+        # Apply non-overlapping chains
+        used_beats = set()
+        for prep_beat, pitch, susp_beat, res_pitch, res_beat, dist in chains:
+            if prep_beat in used_beats or susp_beat in used_beats or res_beat in used_beats:
+                continue
+            # Check for parallel perfect intervals after modification
+            result[prep_beat] = pitch
+            result[susp_beat] = pitch  # hold (suspension)
+            result[res_beat] = res_pitch  # resolution
+            # Verify no parallel fifths/octaves introduced
+            if self._has_parallel_perfect(cf, result):
+                # Revert
+                result[prep_beat] = cp[prep_beat]
+                result[susp_beat] = cp[susp_beat]
+                result[res_beat] = cp[res_beat]
+                continue
+            used_beats.update([prep_beat, susp_beat, res_beat])
+
+        return result
+
+    def _has_parallel_perfect(self, cf: List[int], cp: List[int]) -> bool:
+        """Check for parallel perfect fifths or octaves."""
+        for i in range(1, len(cp)):
+            intv_prev = abs(cp[i - 1] - cf[i - 1]) % 12
+            intv_curr = abs(cp[i] - cf[i]) % 12
+            # Parallel octaves/unisons
+            if intv_prev == 0 and intv_curr == 0:
+                return True
+            # Parallel fifths
+            if intv_prev == 7 and intv_curr == 7:
+                # Check similar motion
+                cp_dir = cp[i] - cp[i - 1]
+                cf_dir = cf[i] - cf[i - 1]
+                if (cp_dir > 0 and cf_dir > 0) or (cp_dir < 0 and cf_dir < 0):
+                    return True
+        return False
+
+    def _consonant_candidates(self, cf_note: int, prev_pitch: int) -> List[int]:
+        """Get consonant candidates sorted by melodic proximity to prev_pitch."""
+        cands = []
+        for p in range(self.voice_range.min_pitch, self.voice_range.max_pitch + 1):
+            if not self.scale.contains(p):
+                continue
+            intv = abs(p - cf_note) % 12
+            if not consonant_interval_class(intv):
+                continue
+            if intv == 0:
+                continue  # Avoid unisons
+            cands.append(p)
+        # Sort by distance from prev for stepwise preference
+        cands.sort(key=lambda p: abs(p - prev_pitch))
+        return cands
 
     def _count_species4_constraints(
         self, cf: Sequence[int], cp: List[int]

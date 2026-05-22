@@ -207,6 +207,85 @@ class TestSpecies4:
         assert result.feasible
         assert len(result.voices[1]) == len(SHORT_CANTUS)
 
+    def test_species4_not_all_identical(self):
+        """Species 4 must produce melodic motion, not a static pedal."""
+        gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS, species=Species.FOURTH)
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
+        unique = len(set(cp))
+        assert unique > 1, f"Species 4 produced static pitch: {cp}"
+
+    def test_species4_melodic_range_at_least_octave(self):
+        """Species 4 counterpoint should span at least an octave."""
+        gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS, species=Species.FOURTH)
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
+        span = max(cp) - min(cp)
+        assert span >= 12, (
+            f"Species 4 melodic range only {span} semitones (need >= 12): {cp}"
+        )
+
+    def test_species4_has_suspension_chains(self):
+        """Species 4 must contain actual suspension patterns:
+        consonant prep → dissonant suspension → consonant resolution."""
+        gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS, species=Species.FOURTH)
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
+        cf = result.voices[0]
+
+        chains = 0
+        for b in range(1, len(cp) - 1):
+            intv_prev = abs(cp[b - 1] - cf[b - 1]) % 12
+            intv_curr = abs(cp[b] - cf[b]) % 12
+            intv_next = abs(cp[b + 1] - cf[b + 1]) % 12
+            # Chain: consonant → dissonant → consonant
+            if (consonant_interval_class(intv_prev)
+                    and not consonant_interval_class(intv_curr)
+                    and consonant_interval_class(intv_next)):
+                chains += 1
+        assert chains >= 1, (
+            f"Species 4 has no suspension chains (consonant→dissonant→consonant). CP={cp}"
+        )
+
+    def test_species4_step_down_resolutions(self):
+        """After a suspension (dissonance), the next note should resolve downward by step."""
+        gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS, species=Species.FOURTH)
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
+        cf = result.voices[0]
+
+        resolutions = 0
+        for b in range(1, len(cp) - 1):
+            intv = abs(cp[b] - cf[b]) % 12
+            if not consonant_interval_class(intv):
+                # This is a suspension — check resolution on next beat
+                diff = cp[b] - cp[b + 1]
+                if 1 <= diff <= 2:
+                    resolutions += 1
+        assert resolutions >= 1, (
+            f"Species 4 has no step-down resolutions after suspensions. CP={cp}"
+        )
+
+    def test_species4_avoids_excessive_unisons(self):
+        """Species 4 should prefer imperfect consonances over unisons."""
+        gen = CounterpointGenerator(cantus_firmus=C_MAJOR_CANTUS, species=Species.FOURTH)
+        result = gen.generate()
+        assert result.feasible
+        cp = result.voices[1]
+        cf = result.voices[0]
+
+        unisons = sum(
+            1 for b in range(len(cp))
+            if abs(cp[b] - cf[b]) % 12 == 0
+        )
+        assert unisons <= len(cp) // 2, (
+            f"Too many unisons ({unisons}/{len(cp)}) in Species 4. CP={cp}"
+        )
+
 
 class TestSpecies5:
     """Species 5: florid counterpoint (mix of species 1-4)."""
