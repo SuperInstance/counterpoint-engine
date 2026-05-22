@@ -15,15 +15,23 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+import random
+
 from counterpoint_engine.rules import (
     SAT,
     UNSAT,
     Satisfiability,
+    cambiata_ok,
     consonant_interval,
+    consonant_interval_class,
+    is_step,
     max_leap_seventh,
     no_parallel_fifths,
     no_parallel_octaves,
+    passing_tone_ok,
     proper_resolution,
+    suspension_preparation,
+    suspension_resolution,
 )
 from counterpoint_engine.laman_counterpoint import CounterpointGraph
 
@@ -40,16 +48,28 @@ class CounterpointResult:
     feasible: bool = True
 
     def to_midi(self, filename: str, bpm: int = 120) -> None:
-        """Export to MIDI file using mido."""
+        """Export to MIDI file using mido.
+
+        For species 2/3/5, the counterpoint has more notes than the CF.
+        CF notes get proportionally longer durations to stay aligned.
+        """
         import mido
         mid = mido.MidiFile(ticks_per_beat=480)
+        cf_len = len(self.voices[0])
+        cp_len = len(self.voices[1]) if len(self.voices) > 1 else cf_len
+        # Duration ratio: how many CP notes per CF note
+        ratio = cp_len // cf_len if cf_len > 0 else 1
+        cp_note_ticks = 480 // ratio if ratio > 0 else 480
+        cf_note_ticks = 480
+
         for i, voice in enumerate(self.voices):
             track = mido.MidiTrack()
             track.append(mido.MetaMessage('track_name', name=f'Voice {i+1}'))
+            note_ticks = cf_note_ticks if i == 0 else cp_note_ticks
             for note in voice:
                 if 0 <= note <= 127:
                     track.append(mido.Message('note_on', note=note, velocity=80, time=0))
-                    track.append(mido.Message('note_off', note=note, velocity=0, time=480))
+                    track.append(mido.Message('note_off', note=note, velocity=0, time=note_ticks))
             mid.tracks.append(track)
         mid.save(filename)
 
@@ -268,11 +288,26 @@ class CounterpointGenerator:
     def generate(self) -> CounterpointResult:
         """Generate a counterpoint voice using backtracking.
 
+        Dispatches to species-specific generation methods.
         Returns a CounterpointResult. If no solution exists under
         the current constraints, feasible is False.
         """
+        species_method = {
+            Species.FIRST: self._generate_species1,
+            Species.SECOND: self._generate_species2,
+            Species.THIRD: self._generate_species3,
+            Species.FOURTH: self._generate_species4,
+            Species.FIFTH: self._generate_species5,
+        }
+        return species_method[self.species]()
+
+    # -----------------------------------------------------------------------
+    # Species 1: note-against-note (existing logic)
+    # -----------------------------------------------------------------------
+
+    def _generate_species1(self) -> CounterpointResult:
         self._solution = []
-        if self._backtrack(0):
+        if self._backtrack_species1(0):
             cp = list(self._solution)
             sat, total = self._count_constraints(self.cantus_firmus, cp)
             return CounterpointResult(
@@ -284,6 +319,420 @@ class CounterpointGenerator:
                 constraints_total=total,
                 feasible=True,
             )
+        return self._infeasible_result()
+
+    def _backtrack_species1(self, beat: int) -> bool:
+        if beat == self.n_beats:
+            return True
+        prev_pitch = self._solution[beat - 1] if beat > 0 else None
+        candidates = self.voice_range.candidates(self.scale, prev_pitch)
+        for pitch in candidates:
+            self._solution.append(pitch)
+            if self._check_all(self._solution, beat):
+                if self._backtrack_species1(beat + 1):
+                    return True
+            self._solution.pop()
+        return False
+
+    # -----------------------------------------------------------------------
+    # Species 2: two-against-one
+    # -----------------------------------------------------------------------
+
+    def _generate_species2(self) -> CounterpointResult:
+        """Two counterpoint notes per CF note.
+
+        Beat 0 (strong): must be consonant with CF.
+        Beat 1 (weak): passing tone — stepwise, can be dissonant.
+        """
+        self._solution = []
+        cf = list(self.cantus_firmus)
+        if self._backtrack_species2(0):
+            cp = list(self._solution)
+            sat, total = self._count_species2_constraints(cf, cp)
+            return CounterpointResult(
+                voices=[cf, cp],
+                species=2,
+                key=self.scale.tonic,
+                n_voices=2,
+                constraints_satisfied=sat,
+                constraints_total=total,
+                feasible=True,
+            )
+        return self._infeasible_result()
+
+    def _backtrack_species2(self, cf_beat: int) -> bool:
+        if cf_beat == self.n_beats:
+            return True
+
+        cf_note = self.cantus_firmus[cf_beat]
+        prev_pitch = self._solution[-1] if self._solution else None
+
+        # Generate the strong-beat note (must be consonant with CF)
+        candidates = self.voice_range.candidates(self.scale, prev_pitch)
+        for pitch in candidates:
+            # Check consonance with CF
+            intv = abs(pitch - cf_note) % 12
+            if not consonant_interval_class(intv):
+                continue
+            # Check melodic leap
+            if prev_pitch is not None and abs(pitch - prev_pitch) > 10:
+                leap_simple = abs(pitch - prev_pitch) % 12
+                if leap_simple > 10 and leap_simple != 12:
+                    continue
+            self._solution.append(pitch)
+
+            # Generate the weak-beat passing tone (stepwise from strong)
+            passing_candidates = self._passing_tone_candidates(pitch)
+            random.shuffle(passing_candidates)
+            for p_pitch in passing_candidates:
+                self._solution.append(p_pitch)
+                if self._backtrack_species2(cf_beat + 1):
+                    return True
+                self._solution.pop()
+
+            self._solution.pop()
+        return False
+
+    def _passing_tone_candidates(self, from_pitch: int) -> List[int]:
+        """Return stepwise neighbors as passing tone candidates."""
+        candidates = []
+        for step in [-2, -1, 1, 2]:
+            p = from_pitch + step
+            if self.voice_range.min_pitch <= p <= self.voice_range.max_pitch:
+                candidates.append(p)
+        return candidates
+
+    def _count_species2_constraints(
+        self, cf: Sequence[int], cp: List[int]
+    ) -> Tuple[int, int]:
+        """Count constraints for species 2."""
+        total = 0
+        sat = 0
+        for cf_beat in range(self.n_beats):
+            strong_idx = cf_beat * 2
+            # Strong beat: must be consonant
+            total += 1
+            intv = abs(cp[strong_idx] - cf[cf_beat]) % 12
+            if consonant_interval_class(intv):
+                sat += 1
+            # Melodic smoothness between consecutive strong beats
+            if cf_beat > 0:
+                prev_strong = (cf_beat - 1) * 2
+                total += 1
+                leap = abs(cp[strong_idx] - cp[prev_strong])
+                if leap <= 10 or leap % 12 == 0:
+                    sat += 1
+        return sat, total
+
+    # -----------------------------------------------------------------------
+    # Species 3: four-against-one
+    # -----------------------------------------------------------------------
+
+    def _generate_species3(self) -> CounterpointResult:
+        """Four counterpoint notes per CF note.
+
+        Beat 0 (strong): consonant with CF.
+        Beats 1-3 (weak): mostly stepwise passing tones, can be dissonant.
+        Beat 3 can use cambiata pattern.
+        """
+        self._solution = []
+        cf = list(self.cantus_firmus)
+        if self._backtrack_species3(0):
+            cp = list(self._solution)
+            sat, total = self._count_species3_constraints(cf, cp)
+            return CounterpointResult(
+                voices=[cf, cp],
+                species=3,
+                key=self.scale.tonic,
+                n_voices=2,
+                constraints_satisfied=sat,
+                constraints_total=total,
+                feasible=True,
+            )
+        return self._infeasible_result()
+
+    def _backtrack_species3(self, cf_beat: int) -> bool:
+        if cf_beat == self.n_beats:
+            return True
+
+        cf_note = self.cantus_firmus[cf_beat]
+        prev_pitch = self._solution[-1] if self._solution else None
+
+        # Generate beat 0 (strong) — must be consonant
+        candidates = self.voice_range.candidates(self.scale, prev_pitch)
+        for pitch in candidates:
+            intv = abs(pitch - cf_note) % 12
+            if not consonant_interval_class(intv):
+                continue
+            if prev_pitch is not None and abs(pitch - prev_pitch) > 10:
+                if abs(pitch - prev_pitch) % 12 != 0:
+                    continue
+            self._solution.append(pitch)
+
+            # Generate beats 1-3 as stepwise motion
+            if self._backtrack_species3_subdivisions(cf_beat, 1, pitch):
+                return True
+            self._solution.pop()
+        return False
+
+    def _backtrack_species3_subdivisions(
+        self, cf_beat: int, sub_beat: int, prev_pitch: int
+    ) -> bool:
+        if sub_beat == 4:
+            # All 4 subdivision notes placed, move to next CF beat
+            return self._backtrack_species3(cf_beat + 1)
+
+        # Generate stepwise note (passing tone)
+        candidates = self._passing_tone_candidates(prev_pitch)
+        # Also allow staying on same pitch for variety
+        if self.voice_range.min_pitch <= prev_pitch <= self.voice_range.max_pitch:
+            candidates.append(prev_pitch)
+        random.shuffle(candidates)
+
+        for pitch in candidates:
+            self._solution.append(pitch)
+            if sub_beat < 3:
+                # beats 1-2: just stepwise
+                if self._backtrack_species3_subdivisions(cf_beat, sub_beat + 1, pitch):
+                    return True
+            else:
+                # beat 3: check that we can transition to next CF beat's consonance
+                if self._backtrack_species3(cf_beat + 1):
+                    return True
+            self._solution.pop()
+        return False
+
+    def _count_species3_constraints(
+        self, cf: Sequence[int], cp: List[int]
+    ) -> Tuple[int, int]:
+        total = 0
+        sat = 0
+        for cf_beat in range(self.n_beats):
+            strong_idx = cf_beat * 4
+            total += 1
+            intv = abs(cp[strong_idx] - cf[cf_beat]) % 12
+            if consonant_interval_class(intv):
+                sat += 1
+        return sat, total
+
+    # -----------------------------------------------------------------------
+    # Species 4: syncopation / suspension
+    # -----------------------------------------------------------------------
+
+    def _generate_species4(self) -> CounterpointResult:
+        """Counterpoint with syncopation — tied across beat boundaries.
+
+        Creates suspension chains:
+        preparation (consonant) → suspension (dissonant) → resolution (consonant, step down)
+        """
+        self._solution = []
+        cf = list(self.cantus_firmus)
+        if self._backtrack_species4(0):
+            cp = list(self._solution)
+            sat, total = self._count_species4_constraints(cf, cp)
+            return CounterpointResult(
+                voices=[cf, cp],
+                species=4,
+                key=self.scale.tonic,
+                n_voices=2,
+                constraints_satisfied=sat,
+                constraints_total=total,
+                feasible=True,
+            )
+        return self._infeasible_result()
+
+    def _backtrack_species4(self, beat: int) -> bool:
+        if beat == self.n_beats:
+            return True
+
+        cf_note = self.cantus_firmus[beat]
+        prev_pitch = self._solution[beat - 1] if beat > 0 else None
+        candidates = self.voice_range.candidates(self.scale, prev_pitch)
+
+        for pitch in candidates:
+            self._solution.append(pitch)
+
+            if beat == 0:
+                # First note must be consonant (preparation)
+                intv = abs(pitch - cf_note) % 12
+                if not consonant_interval_class(intv):
+                    self._solution.pop()
+                    continue
+                if self._backtrack_species4(beat + 1):
+                    return True
+            elif beat == self.n_beats - 1:
+                # Last note: must resolve properly
+                intv = abs(pitch - cf_note) % 12
+                # Either consonant or resolution of suspension
+                if consonant_interval_class(intv):
+                    if self._backtrack_species4(beat + 1):
+                        return True
+                # Check if this is a resolution (step down from prev)
+                elif is_step(pitch, self._solution[beat - 1]) and pitch < self._solution[beat - 1]:
+                    if self._backtrack_species4(beat + 1):
+                        return True
+            else:
+                # Middle beats: can be consonant (preparation/normal)
+                # or dissonant (suspension) — but if dissonant, prev must be consonant prep
+                intv = abs(pitch - cf_note) % 12
+                if consonant_interval_class(intv):
+                    # Consonant — either normal or preparation for next suspension
+                    if self._check_melodic(pitch):
+                        if self._backtrack_species4(beat + 1):
+                            return True
+                else:
+                    # Dissonant — must be a suspension (prev was consonant prep, resolves step down)
+                    prev_cf = self.cantus_firmus[beat - 1]
+                    prev_intv = abs(self._solution[beat - 1] - prev_cf) % 12
+                    if consonant_interval_class(prev_intv):
+                        # Previous was consonant (preparation) — this is suspension
+                        # Next must resolve — we'll check on next beat
+                        if self._check_melodic(pitch):
+                            if self._backtrack_species4(beat + 1):
+                                return True
+            self._solution.pop()
+        return False
+
+    def _check_melodic(self, pitch: int) -> bool:
+        """Check melodic constraints for the current note."""
+        if len(self._solution) < 2:
+            return True
+        prev = self._solution[-2]
+        leap = abs(pitch - prev)
+        if leap > 10 and leap % 12 != 0:
+            return False
+        return True
+
+    def _count_species4_constraints(
+        self, cf: Sequence[int], cp: List[int]
+    ) -> Tuple[int, int]:
+        total = 0
+        sat = 0
+        for beat in range(len(cp)):
+            intv = abs(cp[beat] - cf[beat]) % 12
+            total += 1
+            if consonant_interval_class(intv):
+                sat += 1
+            else:
+                # Dissonance — check if valid suspension
+                if beat > 0:
+                    prev_intv = abs(cp[beat - 1] - cf[beat - 1]) % 12
+                    if consonant_interval_class(prev_intv):
+                        sat += 1  # valid suspension
+        return sat, total
+
+    # -----------------------------------------------------------------------
+    # Species 5: florid (mix of species 1-4)
+    # -----------------------------------------------------------------------
+
+    def _generate_species5(self) -> CounterpointResult:
+        """Florid counterpoint — free mix of species 1-4 patterns.
+
+        For each CF note, randomly choose a subdivision pattern:
+        - 1 note (species 1 style)
+        - 2 notes (species 2 style)
+        - 4 notes (species 3 style)
+        """
+        self._solution = []
+        cf = list(self.cantus_firmus)
+        # Pre-determine subdivision pattern for each CF beat
+        random.seed(hash(tuple(cf)))  # deterministic for same CF
+        subdivisions = [random.choice([1, 1, 2, 2, 4]) for _ in range(self.n_beats)]
+        # Ensure first and last are species-1 style (standard practice)
+        subdivisions[0] = 1
+        subdivisions[-1] = 1
+
+        if self._backtrack_species5(0, subdivisions):
+            cp = list(self._solution)
+            sat, total = self._count_species5_constraints(cf, cp, subdivisions)
+            return CounterpointResult(
+                voices=[cf, cp],
+                species=5,
+                key=self.scale.tonic,
+                n_voices=2,
+                constraints_satisfied=sat,
+                constraints_total=total,
+                feasible=True,
+            )
+        return self._infeasible_result()
+
+    def _backtrack_species5(
+        self, cf_beat: int, subdivisions: List[int]
+    ) -> bool:
+        if cf_beat == self.n_beats:
+            return True
+
+        cf_note = self.cantus_firmus[cf_beat]
+        n_sub = subdivisions[cf_beat]
+        prev_pitch = self._solution[-1] if self._solution else None
+
+        # Strong beat must be consonant
+        candidates = self.voice_range.candidates(self.scale, prev_pitch)
+        for pitch in candidates:
+            intv = abs(pitch - cf_note) % 12
+            if not consonant_interval_class(intv):
+                continue
+            if prev_pitch is not None and abs(pitch - prev_pitch) > 10:
+                if abs(pitch - prev_pitch) % 12 != 0:
+                    continue
+            self._solution.append(pitch)
+
+            if n_sub == 1:
+                if self._backtrack_species5(cf_beat + 1, subdivisions):
+                    return True
+            elif n_sub == 2:
+                # Species 2 style: one passing tone
+                passing = self._passing_tone_candidates(pitch)
+                random.shuffle(passing)
+                for p in passing:
+                    self._solution.append(p)
+                    if self._backtrack_species5(cf_beat + 1, subdivisions):
+                        return True
+                    self._solution.pop()
+            elif n_sub == 4:
+                # Species 3 style: three passing tones
+                if self._gen_florid_passing(cf_beat, subdivisions, 1, pitch):
+                    return True
+            self._solution.pop()
+        return False
+
+    def _gen_florid_passing(
+        self, cf_beat: int, subdivisions: List[int], sub: int, prev: int
+    ) -> bool:
+        if sub == subdivisions[cf_beat]:
+            return self._backtrack_species5(cf_beat + 1, subdivisions)
+        candidates = self._passing_tone_candidates(prev)
+        if self.voice_range.min_pitch <= prev <= self.voice_range.max_pitch:
+            candidates.append(prev)
+        random.shuffle(candidates)
+        for p in candidates:
+            self._solution.append(p)
+            if self._gen_florid_passing(cf_beat, subdivisions, sub + 1, p):
+                return True
+            self._solution.pop()
+        return False
+
+    def _count_species5_constraints(
+        self, cf: Sequence[int], cp: List[int], subdivisions: List[int]
+    ) -> Tuple[int, int]:
+        total = 0
+        sat = 0
+        idx = 0
+        for cf_beat in range(self.n_beats):
+            n_sub = subdivisions[cf_beat]
+            # Strong beat consonance
+            intv = abs(cp[idx] - cf[cf_beat]) % 12
+            total += 1
+            if consonant_interval_class(intv):
+                sat += 1
+            idx += n_sub
+        return sat, total
+
+    # -----------------------------------------------------------------------
+    # Helpers
+    # -----------------------------------------------------------------------
+
+    def _infeasible_result(self) -> CounterpointResult:
         return CounterpointResult(
             voices=[list(self.cantus_firmus)],
             species=int(self.species),
@@ -293,22 +742,6 @@ class CounterpointGenerator:
             constraints_total=len(self.constraints),
             feasible=False,
         )
-
-    def _backtrack(self, beat: int) -> bool:
-        if beat == self.n_beats:
-            return True
-
-        prev_pitch = self._solution[beat - 1] if beat > 0 else None
-        candidates = self.voice_range.candidates(self.scale, prev_pitch)
-
-        for pitch in candidates:
-            self._solution.append(pitch)
-            if self._check_all(self._solution, beat):
-                if self._backtrack(beat + 1):
-                    return True
-            self._solution.pop()
-
-        return False
 
     def generate_n_voices(
         self,

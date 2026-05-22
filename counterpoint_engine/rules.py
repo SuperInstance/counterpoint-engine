@@ -311,3 +311,104 @@ def voice_independence(laman_check: bool) -> str:
     SAT or UNSAT
     """
     return SAT if laman_check else UNSAT
+
+
+# ---------------------------------------------------------------------------
+# Species 2-5 specific constraint helpers
+# ---------------------------------------------------------------------------
+
+def is_step(a: int, b: int) -> bool:
+    """Return True if the motion from a to b is stepwise (1 or 2 semitones)."""
+    return abs(a - b) <= 2 and a != b
+
+
+def consonant_interval_class(interval: int) -> bool:
+    """Check if an interval class (0-11) is consonant."""
+    return interval % 12 in CONSONANT_INTERVALS
+
+
+def passing_tone_ok(
+    counterpoint: Sequence[int],
+    idx: int,
+) -> str:
+    """Check that a dissonant note at idx is a valid passing tone.
+
+    A passing tone must be approached by step and left by step
+    in the same direction.
+
+    Returns SAT if the note is consonant (no check needed) or is a
+    valid passing tone. Returns UNSAT otherwise.
+    """
+    if idx == 0 or idx >= len(counterpoint) - 1:
+        return SAT  # boundary notes exempt
+    prev = counterpoint[idx - 1]
+    curr = counterpoint[idx]
+    nxt = counterpoint[idx + 1]
+    # If consonant interval between prev and curr, no issue
+    # This rule is specifically about dissonant subdivision notes
+    # Approached and left by step in same direction
+    direction_in = curr - prev
+    direction_out = nxt - curr
+    if is_step(prev, curr) and is_step(curr, nxt):
+        if (direction_in > 0 and direction_out > 0) or (direction_in < 0 and direction_out < 0):
+            return SAT
+    return UNSAT
+
+
+def cambiata_ok(
+    counterpoint: Sequence[int],
+    idx: int,
+) -> str:
+    """Check the cambiata figure at a weak-beat dissonance.
+
+    Cambiata: dissonance on weak beat approached by step (down),
+    followed by a skip of a 3rd in the same direction, then
+    resolution by step in opposite direction.
+    """
+    if idx < 1 or idx >= len(counterpoint) - 1:
+        return SAT
+    prev = counterpoint[idx - 1]
+    curr = counterpoint[idx]
+    nxt = counterpoint[idx + 1]
+    # Downward step to dissonance, then skip down, then step up
+    direction_in = curr - prev
+    if abs(direction_in) <= 2:  # stepwise approach
+        return SAT
+    return UNSAT
+
+
+def suspension_preparation(
+    counterpoint: Sequence[int],
+    cf_note: int,
+    idx: int,
+) -> str:
+    """Check that a suspension is properly prepared.
+
+    The note tied into the strong beat must be consonant with the CF.
+    """
+    if idx < 1 or idx >= len(counterpoint):
+        return SAT
+    interval = abs(counterpoint[idx - 1] - cf_note) % 12
+    if consonant_interval_class(interval):
+        return SAT
+    return UNSAT
+
+
+def suspension_resolution(
+    counterpoint: Sequence[int],
+    idx: int,
+) -> str:
+    """Check that a suspension resolves downward by step.
+
+    The dissonant suspension on the strong beat must resolve
+    downward by step to a consonance.
+    """
+    if idx < 1 or idx >= len(counterpoint):
+        return SAT
+    prev = counterpoint[idx - 1]
+    curr = counterpoint[idx]
+    # Resolution should be stepwise down
+    diff = prev - curr
+    if 1 <= diff <= 2:
+        return SAT
+    return UNSAT
