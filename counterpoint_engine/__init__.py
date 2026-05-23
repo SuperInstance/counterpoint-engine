@@ -28,6 +28,8 @@ from .generator import (
     CounterpointGenerator,
     CounterpointResult,
     Species,
+    VoiceRange,
+    Scale,
 )
 from .tensor_output import (
     TensorMIDIEvent,
@@ -56,6 +58,8 @@ __all__ = [
     "CounterpointGenerator",
     "CounterpointResult",
     "Species",
+    "VoiceRange",
+    "Scale",
     # Tensor output
     "TensorMIDIEvent",
     "voices_to_tensor_events",
