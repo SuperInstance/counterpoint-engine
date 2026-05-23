@@ -684,12 +684,16 @@ class CounterpointGenerator:
         """
         result = list(cp)
         n = len(cf)
+        max_susp_leap = 12  # max semitones a suspension pitch can jump from framework
 
         # Find all possible suspension chains
         chains = []  # list of (prep_beat, pitch, susp_beat, res_pitch, res_beat)
         for b in range(n - 2):
             for p in range(self.voice_range.min_pitch, self.voice_range.max_pitch + 1):
                 if not self.scale.contains(p):
+                    continue
+                # Leap constraint: don't jump too far from framework pitch
+                if abs(p - cp[b]) > max_susp_leap:
                     continue
                 # Preparation: consonant with cf[b]
                 if not consonant_interval_class(abs(p - cf[b]) % 12):
