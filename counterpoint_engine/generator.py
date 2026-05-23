@@ -11,12 +11,16 @@ Output: MIDI file or tensor-midi event stream.
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-import random
-
+from counterpoint_engine.exceptions import (
+    InvalidInputError,
+    GenerationError,
+    RangeViolationError,
+)
 from counterpoint_engine.rules import (
     SAT,
     UNSAT,
@@ -36,9 +40,42 @@ from counterpoint_engine.rules import (
 from counterpoint_engine.laman_counterpoint import CounterpointGraph
 
 
-@dataclass(frozen=True)
+# ---------------------------------------------------------------------------
+# Public data types
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True, slots=True)
 class CounterpointResult:
-    """Typed result from counterpoint generation."""
+    """Typed result from counterpoint generation.
+
+    Attributes
+    ----------
+    voices : List[List[int]]
+        Generated voices. ``voices[0]`` is the cantus firmus.
+    species : int
+        Species number (1–5).
+    key : int
+        Tonic pitch class of the key.
+    n_voices : int
+        Total number of voices.
+    constraints_satisfied : int
+        Number of individual constraint checks that passed.
+    constraints_total : int
+        Total number of individual constraint checks evaluated.
+    feasible : bool
+        Whether a valid solution was found.
+
+    Example
+    -------
+    >>> from counterpoint_engine.generator import CounterpointGenerator, Species
+    >>> gen = CounterpointGenerator(cantus_firmus=[60, 62, 64])
+    >>> result = gen.generate()
+    >>> result.feasible
+    True
+    >>> len(result.voices)
+    2
+    """
+
     voices: List[List[int]]
     species: int
     key: int
@@ -52,6 +89,18 @@ class CounterpointResult:
 
         For species 2/3/5, the counterpoint has more notes than the CF.
         CF notes get proportionally longer durations to stay aligned.
+
+        Parameters
+        ----------
+        filename : str
+            Output MIDI file path.
+        bpm : int, default 120
+            Beats per minute (used for tempo meta-message).
+
+        Raises
+        ------
+        ImportError
+            If the ``mido`` package is not installed.
         """
         import mido
         mid = mido.MidiFile(ticks_per_beat=480)
@@ -73,12 +122,30 @@ class CounterpointResult:
             mid.tracks.append(track)
         mid.save(filename)
 
-    def __repr__(self):
-        return f"CounterpointResult({self.n_voices}v species-{self.species}, key={self.key}, {self.constraints_satisfied}/{self.constraints_total} constraints)"
+    def __repr__(self) -> str:
+        return (
+            f"CounterpointResult({self.n_voices}v species-{self.species}, "
+            f"key={self.key}, {self.constraints_satisfied}/{self.constraints_total} constraints)"
+        )
 
 
 class Species(IntEnum):
-    """Species of counterpoint."""
+    """Species of counterpoint.
+
+    Attributes
+    ----------
+    FIRST : int
+        Note-against-note (1:1).
+    SECOND : int
+        Two notes against one (2:1).
+    THIRD : int
+        Four notes against one (4:1).
+    FOURTH : int
+        Suspensions (syncopation).
+    FIFTH : int
+        Florid counterpoint (free mix of species 1–4).
+    """
+
     FIRST = 1  # note against note
     SECOND = 2  # two notes against one
     THIRD = 3  # three notes against one
@@ -86,9 +153,31 @@ class Species(IntEnum):
     FIFTH = 5  # florid counterpoint
 
 
-@dataclass
+@dataclass(slots=True)
 class VoiceRange:
-    """Allowed pitch range for a voice."""
+    """Allowed pitch range for a voice.
+
+    Parameters
+    ----------
+    min_pitch : int
+        Lowest allowed MIDI note number (default C3 = 48).
+    max_pitch : int
+        Highest allowed MIDI note number (default G5 = 79).
+
+    Raises
+    ------
+    TypeError
+        If min_pitch or max_pitch are not integers.
+    ValueError
+        If pitches are outside MIDI range 0–127 or min > max.
+
+    Example
+    -------
+    >>> vr = VoiceRange(min_pitch=55, max_pitch=72)
+    >>> vr.min_pitch
+    55
+    """
+
     min_pitch: int = 48  # C3
     max_pitch: int = 79  # G5
 
@@ -121,7 +210,20 @@ class VoiceRange:
         return f"VoiceRange(min_pitch={self.min_pitch}, max_pitch={self.max_pitch})"
 
     def candidates(self, scale: Scale, prev_pitch: Optional[int] = None) -> List[int]:
-        """Return all valid pitches in range belonging to scale."""
+        """Return all valid pitches in range belonging to *scale*.
+
+        Parameters
+        ----------
+        scale : Scale
+            The diatonic scale to filter pitches against.
+        prev_pitch : int or None
+            If provided, sort candidates by proximity for stepwise preference.
+
+        Returns
+        -------
+        List[int]
+            MIDI pitches in range that belong to the scale.
+        """
         cands = [p for p in range(self.min_pitch, self.max_pitch + 1)
                  if scale.contains(p)]
         if prev_pitch is not None:
@@ -130,9 +232,32 @@ class VoiceRange:
         return cands
 
 
-@dataclass
+@dataclass(slots=True)
 class Scale:
-    """Diatonic scale represented as pitch classes."""
+    """Diatonic scale represented as pitch classes.
+
+    Parameters
+    ----------
+    tonic : int
+        Tonic pitch class (default 0 = C).
+    mode : str
+        ``'major'`` or ``'minor'`` (default ``'major'``).
+
+    Raises
+    ------
+    ValueError
+        If *mode* is not ``'major'`` or ``'minor'`` and no explicit
+        pitch classes are provided.
+
+    Example
+    -------
+    >>> s = Scale(tonic=0, mode="major")
+    >>> s.contains(62)  # D in C major
+    True
+    >>> s.contains(63)  # D# not in C major
+    False
+    """
+
     tonic: int = 0  # C major by default
     mode: str = "major"
     _pitch_classes: Tuple[int, ...] = field(
@@ -151,15 +276,37 @@ class Scale:
             intervals = (0, 2, 3, 5, 7, 8, 10)
         else:
             intervals = self._pitch_classes
-        self._pitch_classes = tuple(sorted((self.tonic + i) % 12 for i in intervals))
+        object.__setattr__(
+            self,
+            "_pitch_classes",
+            tuple(sorted((self.tonic + i) % 12 for i in intervals)),
+        )
 
     def __repr__(self) -> str:
         return f"Scale(tonic={self.tonic}, mode={self.mode!r})"
 
     def contains(self, pitch: int) -> bool:
+        """Check whether *pitch* belongs to this scale.
+
+        Parameters
+        ----------
+        pitch : int
+            MIDI note number.
+
+        Returns
+        -------
+        bool
+        """
         return (pitch % 12) in self._pitch_classes
 
     def pitch_classes(self) -> Tuple[int, ...]:
+        """Return the pitch classes of this scale.
+
+        Returns
+        -------
+        Tuple[int, ...]
+            Sorted tuple of pitch classes 0–11.
+        """
         return self._pitch_classes
 
 
@@ -180,7 +327,7 @@ class CounterpointGenerator:
     Parameters
     ----------
     cantus_firmus : Sequence[int]
-        The fixed melody (MIDI note numbers).
+        The fixed melody (MIDI note numbers). Must not be empty.
     species : Species, default Species.FIRST
         Species of counterpoint to generate.
     scale : Scale, default C major
@@ -189,6 +336,18 @@ class CounterpointGenerator:
         Allowed range for the generated voice.
     constraints : List[Callable], optional
         Active FLUX constraints. Defaults to first-species suite.
+
+    Raises
+    ------
+    ValueError
+        If *cantus_firmus* is empty or *species* is not a valid Species.
+
+    Example
+    -------
+    >>> gen = CounterpointGenerator(cantus_firmus=[60, 62, 64, 65, 67])
+    >>> result = gen.generate()
+    >>> result.feasible
+    True
     """
 
     cantus_firmus: Sequence[int]
@@ -206,7 +365,20 @@ class CounterpointGenerator:
             raise ValueError(
                 f"species must be a Species enum, got {type(self.species).__name__}"
             )
-        self.n_beats = len(self.cantus_firmus)
+        # Validate cantus firmus pitches
+        for i, pitch in enumerate(self.cantus_firmus):
+            if not isinstance(pitch, int):
+                raise TypeError(
+                    f"cantus_firmus[{i}] must be an int, got {type(pitch).__name__}"
+                )
+            if not (0 <= pitch <= 127):
+                raise RangeViolationError(
+                    pitch=pitch,
+                    min_pitch=0,
+                    max_pitch=127,
+                    beat=i,
+                )
+        self.n_beats: int = len(self.cantus_firmus)
         self._solution: List[int] = []
         self._graph: Optional[CounterpointGraph] = None
 
@@ -216,8 +388,25 @@ class CounterpointGenerator:
             f"species={self.species.name}, scale={self.scale!r})"
         )
 
+    # ------------------------------------------------------------------
+    # Constraint checking
+    # ------------------------------------------------------------------
+
     def _check_all(self, counterpoint: List[int], up_to: int) -> bool:
-        """Check all constraints on the partial counterpoint up to beat `up_to`."""
+        """Check all constraints on the partial counterpoint up to beat *up_to*.
+
+        Parameters
+        ----------
+        counterpoint : List[int]
+            Partial counterpoint built so far.
+        up_to : int
+            Check beats 0..up_to (inclusive).
+
+        Returns
+        -------
+        bool
+            True if all constraints pass.
+        """
         beats = list(range(up_to + 1))
         for constraint in self.constraints:
             name = constraint.__name__
@@ -254,8 +443,23 @@ class CounterpointGenerator:
                     return False
         return True
 
-    def _count_constraints(self, cantus: Sequence[int], counterpoint: List[int]) -> Tuple[int, int]:
-        """Count satisfied vs total constraints for a generated counterpoint."""
+    def _count_constraints(
+        self, cantus: Sequence[int], counterpoint: List[int]
+    ) -> Tuple[int, int]:
+        """Count satisfied vs total constraints for a generated counterpoint.
+
+        Parameters
+        ----------
+        cantus : Sequence[int]
+            The cantus firmus.
+        counterpoint : List[int]
+            The generated counterpoint.
+
+        Returns
+        -------
+        Tuple[int, int]
+            (satisfied_count, total_count)
+        """
         total = 0
         satisfied = 0
         beats = list(range(len(counterpoint)))
@@ -285,14 +489,29 @@ class CounterpointGenerator:
                     satisfied += 1  # Can't evaluate, assume satisfied
         return satisfied, total
 
+    # ------------------------------------------------------------------
+    # Generation entry point
+    # ------------------------------------------------------------------
+
     def generate(self) -> CounterpointResult:
         """Generate a counterpoint voice using backtracking.
 
-        Dispatches to species-specific generation methods.
-        Returns a CounterpointResult. If no solution exists under
-        the current constraints, feasible is False.
+        Dispatches to the species-specific generation method based on
+        ``self.species``.
+
+        Returns
+        -------
+        CounterpointResult
+            Typed result with voices and constraint stats. If no
+            solution exists under the current constraints,
+            ``result.feasible`` will be ``False``.
+
+        Raises
+        ------
+        GenerationError
+            If an unexpected error occurs during generation.
         """
-        species_method = {
+        species_method: Dict[Species, Callable[[], CounterpointResult]] = {
             Species.FIRST: self._generate_species1,
             Species.SECOND: self._generate_species2,
             Species.THIRD: self._generate_species3,
@@ -302,10 +521,11 @@ class CounterpointGenerator:
         return species_method[self.species]()
 
     # -----------------------------------------------------------------------
-    # Species 1: note-against-note (existing logic)
+    # Species 1: note-against-note
     # -----------------------------------------------------------------------
 
     def _generate_species1(self) -> CounterpointResult:
+        """Generate first-species (1:1 note-against-note) counterpoint."""
         self._solution = []
         if self._backtrack_species1(0):
             cp = list(self._solution)
@@ -339,10 +559,10 @@ class CounterpointGenerator:
     # -----------------------------------------------------------------------
 
     def _generate_species2(self) -> CounterpointResult:
-        """Two counterpoint notes per CF note.
+        """Generate second-species (2:1) counterpoint.
 
-        Beat 0 (strong): must be consonant with CF.
-        Beat 1 (weak): passing tone — stepwise, can be dissonant.
+        Two counterpoint notes per CF note. Strong beats must be
+        consonant; weak beats are passing tones.
         """
         self._solution = []
         cf = list(self.cantus_firmus)
@@ -394,8 +614,19 @@ class CounterpointGenerator:
         return False
 
     def _passing_tone_candidates(self, from_pitch: int) -> List[int]:
-        """Return stepwise neighbors as passing tone candidates."""
-        candidates = []
+        """Return stepwise neighbors as passing tone candidates.
+
+        Parameters
+        ----------
+        from_pitch : int
+            The pitch to step from.
+
+        Returns
+        -------
+        List[int]
+            Pitches ±1 and ±2 semitones within voice range.
+        """
+        candidates: List[int] = []
         for step in [-2, -1, 1, 2]:
             p = from_pitch + step
             if self.voice_range.min_pitch <= p <= self.voice_range.max_pitch:
@@ -405,7 +636,20 @@ class CounterpointGenerator:
     def _count_species2_constraints(
         self, cf: Sequence[int], cp: List[int]
     ) -> Tuple[int, int]:
-        """Count constraints for species 2."""
+        """Count constraints for species 2.
+
+        Parameters
+        ----------
+        cf : Sequence[int]
+            Cantus firmus.
+        cp : List[int]
+            Counterpoint (2x length of CF).
+
+        Returns
+        -------
+        Tuple[int, int]
+            (satisfied, total)
+        """
         total = 0
         sat = 0
         for cf_beat in range(self.n_beats):
@@ -429,11 +673,10 @@ class CounterpointGenerator:
     # -----------------------------------------------------------------------
 
     def _generate_species3(self) -> CounterpointResult:
-        """Four counterpoint notes per CF note.
+        """Generate third-species (4:1) counterpoint.
 
-        Beat 0 (strong): consonant with CF.
-        Beats 1-3 (weak): mostly stepwise passing tones, can be dissonant.
-        Beat 3 can use cambiata pattern.
+        Four counterpoint notes per CF note. Strong beats must be
+        consonant; weak beats are stepwise passing tones.
         """
         self._solution = []
         cf = list(self.cantus_firmus)
@@ -479,12 +722,9 @@ class CounterpointGenerator:
         self, cf_beat: int, sub_beat: int, prev_pitch: int
     ) -> bool:
         if sub_beat == 4:
-            # All 4 subdivision notes placed, move to next CF beat
             return self._backtrack_species3(cf_beat + 1)
 
-        # Generate stepwise note (passing tone)
         candidates = self._passing_tone_candidates(prev_pitch)
-        # Also allow staying on same pitch for variety
         if self.voice_range.min_pitch <= prev_pitch <= self.voice_range.max_pitch:
             candidates.append(prev_pitch)
         random.shuffle(candidates)
@@ -492,11 +732,9 @@ class CounterpointGenerator:
         for pitch in candidates:
             self._solution.append(pitch)
             if sub_beat < 3:
-                # beats 1-2: just stepwise
                 if self._backtrack_species3_subdivisions(cf_beat, sub_beat + 1, pitch):
                     return True
             else:
-                # beat 3: check that we can transition to next CF beat's consonance
                 if self._backtrack_species3(cf_beat + 1):
                     return True
             self._solution.pop()
@@ -505,6 +743,20 @@ class CounterpointGenerator:
     def _count_species3_constraints(
         self, cf: Sequence[int], cp: List[int]
     ) -> Tuple[int, int]:
+        """Count constraints for species 3.
+
+        Parameters
+        ----------
+        cf : Sequence[int]
+            Cantus firmus.
+        cp : List[int]
+            Counterpoint (4x length of CF).
+
+        Returns
+        -------
+        Tuple[int, int]
+            (satisfied, total)
+        """
         total = 0
         sat = 0
         for cf_beat in range(self.n_beats):
@@ -520,10 +772,11 @@ class CounterpointGenerator:
     # -----------------------------------------------------------------------
 
     def _generate_species4(self) -> CounterpointResult:
-        """Counterpoint with syncopation — tied across beat boundaries.
+        """Generate fourth-species counterpoint with syncopation.
 
         Creates suspension chains:
-        preparation (consonant) → suspension (dissonant) → resolution (consonant, step down)
+        preparation (consonant) → suspension (dissonant) →
+        resolution (consonant, step down)
 
         Two-pass approach:
         1. Generate consonant frameworks with varying range
@@ -532,11 +785,11 @@ class CounterpointGenerator:
         """
         cf = list(self.cantus_firmus)
 
-        best_solution = None
+        best_solution: Optional[List[int]] = None
         best_score = -1
 
         # Collect all valid starting pitches
-        start_pitches = []
+        start_pitches: List[int] = []
         for p in range(self.voice_range.max_pitch, self.voice_range.min_pitch - 1, -1):
             if not self.scale.contains(p):
                 continue
@@ -548,7 +801,6 @@ class CounterpointGenerator:
             self._solution = [start]
             if self._species4_backtrack_framework(cf, 1):
                 framework = list(self._solution)
-                # Try inserting suspensions into this framework
                 with_susp = self._species4_insert_suspensions(cf, framework)
                 susp_count = sum(
                     1 for b in range(len(with_susp))
@@ -557,7 +809,6 @@ class CounterpointGenerator:
                 span = max(with_susp) - min(with_susp)
                 unique = len(set(with_susp))
 
-                # Ideal: suspensions + wide range
                 if susp_count >= 1 and span >= 12:
                     best_solution = with_susp
                     break
@@ -584,13 +835,23 @@ class CounterpointGenerator:
         """Find a consonant melodic framework with wide range.
 
         Strategy: build an arc-shaped melody that goes high then low
-        (or vice versa) to span a wide range, ensuring consonance at every beat.
+        (or vice versa) to span a wide range, ensuring consonance at
+        every beat.
+
+        Parameters
+        ----------
+        cf : List[int]
+            Cantus firmus.
+
+        Returns
+        -------
+        List[int] or None
+            Framework pitches, or None if no valid framework found.
         """
-        best = None
+        best: Optional[List[int]] = None
         best_score = -1
 
-        # Collect all valid starting pitches
-        start_pitches = []
+        start_pitches: List[int] = []
         for p in range(self.voice_range.max_pitch, self.voice_range.min_pitch - 1, -1):
             if not self.scale.contains(p):
                 continue
@@ -598,8 +859,7 @@ class CounterpointGenerator:
             if consonant_interval_class(intv) and intv != 0:
                 start_pitches.append(p)
 
-        # Also collect ending pitches for the last CF note
-        end_targets = []
+        end_targets: List[int] = []
         for p in range(self.voice_range.min_pitch, self.voice_range.max_pitch + 1):
             if not self.scale.contains(p):
                 continue
@@ -608,10 +868,9 @@ class CounterpointGenerator:
                 end_targets.append(p)
 
         for start in start_pitches[:15]:
-            # Plan a target arc: aim for a pitch far from start on the last beat
             for end_pitch in end_targets:
                 if abs(end_pitch - start) < 12:
-                    continue  # skip if not enough span potential
+                    continue
                 self._solution = [start]
                 self._s4_target_end = end_pitch
                 if self._species4_backtrack_framework(cf, 1):
@@ -625,7 +884,6 @@ class CounterpointGenerator:
                     if span >= 12 and unique >= 4:
                         return best
 
-        # Fallback: no arc target, just search normally
         for start in start_pitches[:15]:
             self._solution = [start]
             self._s4_target_end = None
@@ -649,7 +907,6 @@ class CounterpointGenerator:
         prev_pitch = self._solution[beat - 1]
         candidates = self._consonant_candidates(cf_note, prev_pitch)
 
-        # If we have a target end pitch, steer toward it
         target = getattr(self, '_s4_target_end', None)
         if target is not None and beat >= self.n_beats - 2:
             candidates.sort(key=lambda p: abs(p - target))
@@ -680,28 +937,33 @@ class CounterpointGenerator:
         - P is dissonant with cf[b+1] (suspension)
         - P-step is consonant with cf[b+2] (resolution)
 
-        Prefer P close to the existing cp[b] to maintain the framework's range.
+        Parameters
+        ----------
+        cf : List[int]
+            Cantus firmus.
+        cp : List[int]
+            Consonant framework to modify.
+
+        Returns
+        -------
+        List[int]
+            Modified framework with suspensions inserted.
         """
         result = list(cp)
         n = len(cf)
-        max_susp_leap = 12  # max semitones a suspension pitch can jump from framework
+        max_susp_leap = 12
 
-        # Find all possible suspension chains
-        chains = []  # list of (prep_beat, pitch, susp_beat, res_pitch, res_beat)
+        chains: List[Tuple[int, int, int, int, int, int]] = []
         for b in range(n - 2):
             for p in range(self.voice_range.min_pitch, self.voice_range.max_pitch + 1):
                 if not self.scale.contains(p):
                     continue
-                # Leap constraint: don't jump too far from framework pitch
                 if abs(p - cp[b]) > max_susp_leap:
                     continue
-                # Preparation: consonant with cf[b]
                 if not consonant_interval_class(abs(p - cf[b]) % 12):
                     continue
-                # Suspension: dissonant with cf[b+1]
                 if consonant_interval_class(abs(p - cf[b + 1]) % 12):
                     continue
-                # Resolution: step down to consonance with cf[b+2]
                 for step in [1, 2]:
                     res = p - step
                     if not (self.voice_range.min_pitch <= res <= self.voice_range.max_pitch):
@@ -709,28 +971,20 @@ class CounterpointGenerator:
                     if not self.scale.contains(res):
                         continue
                     if consonant_interval_class(abs(res - cf[b + 2]) % 12):
-                        # Check that resolution interval isn't unison (boring)
-                        res_intv = abs(res - cf[b + 2]) % 12
-                        # Valid chain found
-                        dist = abs(p - cp[b])  # how far from framework
+                        dist = abs(p - cp[b])
                         chains.append((b, p, b + 1, res, b + 2, dist))
-                        break  # take first valid step
+                        break
 
-        # Sort by distance from framework (prefer minimal changes)
         chains.sort(key=lambda c: c[5])
 
-        # Apply non-overlapping chains
-        used_beats = set()
+        used_beats: set = set()
         for prep_beat, pitch, susp_beat, res_pitch, res_beat, dist in chains:
             if prep_beat in used_beats or susp_beat in used_beats or res_beat in used_beats:
                 continue
-            # Check for parallel perfect intervals after modification
             result[prep_beat] = pitch
-            result[susp_beat] = pitch  # hold (suspension)
-            result[res_beat] = res_pitch  # resolution
-            # Verify no parallel fifths/octaves introduced
+            result[susp_beat] = pitch
+            result[res_beat] = res_pitch
             if self._has_parallel_perfect(cf, result):
-                # Revert
                 result[prep_beat] = cp[prep_beat]
                 result[susp_beat] = cp[susp_beat]
                 result[res_beat] = cp[res_beat]
@@ -740,16 +994,26 @@ class CounterpointGenerator:
         return result
 
     def _has_parallel_perfect(self, cf: List[int], cp: List[int]) -> bool:
-        """Check for parallel perfect fifths or octaves."""
+        """Check for parallel perfect fifths or octaves.
+
+        Parameters
+        ----------
+        cf : List[int]
+            Cantus firmus.
+        cp : List[int]
+            Counterpoint.
+
+        Returns
+        -------
+        bool
+            True if parallel perfect intervals are found.
+        """
         for i in range(1, len(cp)):
             intv_prev = abs(cp[i - 1] - cf[i - 1]) % 12
             intv_curr = abs(cp[i] - cf[i]) % 12
-            # Parallel octaves/unisons
             if intv_prev == 0 and intv_curr == 0:
                 return True
-            # Parallel fifths
             if intv_prev == 7 and intv_curr == 7:
-                # Check similar motion
                 cp_dir = cp[i] - cp[i - 1]
                 cf_dir = cf[i] - cf[i - 1]
                 if (cp_dir > 0 and cf_dir > 0) or (cp_dir < 0 and cf_dir < 0):
@@ -757,8 +1021,21 @@ class CounterpointGenerator:
         return False
 
     def _consonant_candidates(self, cf_note: int, prev_pitch: int) -> List[int]:
-        """Get consonant candidates sorted by melodic proximity to prev_pitch."""
-        cands = []
+        """Get consonant candidates sorted by melodic proximity.
+
+        Parameters
+        ----------
+        cf_note : int
+            Current cantus firmus note.
+        prev_pitch : int
+            Previous counterpoint pitch.
+
+        Returns
+        -------
+        List[int]
+            Consonant pitches sorted by distance from prev_pitch.
+        """
+        cands: List[int] = []
         for p in range(self.voice_range.min_pitch, self.voice_range.max_pitch + 1):
             if not self.scale.contains(p):
                 continue
@@ -768,13 +1045,26 @@ class CounterpointGenerator:
             if intv == 0:
                 continue  # Avoid unisons
             cands.append(p)
-        # Sort by distance from prev for stepwise preference
         cands.sort(key=lambda p: abs(p - prev_pitch))
         return cands
 
     def _count_species4_constraints(
         self, cf: Sequence[int], cp: List[int]
     ) -> Tuple[int, int]:
+        """Count constraints for species 4.
+
+        Parameters
+        ----------
+        cf : Sequence[int]
+            Cantus firmus.
+        cp : List[int]
+            Counterpoint (same length as CF).
+
+        Returns
+        -------
+        Tuple[int, int]
+            (satisfied, total)
+        """
         total = 0
         sat = 0
         for beat in range(len(cp)):
@@ -783,11 +1073,10 @@ class CounterpointGenerator:
             if consonant_interval_class(intv):
                 sat += 1
             else:
-                # Dissonance — check if valid suspension
                 if beat > 0:
                     prev_intv = abs(cp[beat - 1] - cf[beat - 1]) % 12
                     if consonant_interval_class(prev_intv):
-                        sat += 1  # valid suspension
+                        sat += 1
         return sat, total
 
     # -----------------------------------------------------------------------
@@ -795,19 +1084,15 @@ class CounterpointGenerator:
     # -----------------------------------------------------------------------
 
     def _generate_species5(self) -> CounterpointResult:
-        """Florid counterpoint — free mix of species 1-4 patterns.
+        """Generate fifth-species (florid) counterpoint.
 
-        For each CF note, randomly choose a subdivision pattern:
-        - 1 note (species 1 style)
-        - 2 notes (species 2 style)
-        - 4 notes (species 3 style)
+        Free mix of species 1–4 patterns. For each CF note, a
+        subdivision pattern (1, 2, or 4 notes) is randomly chosen.
         """
         self._solution = []
         cf = list(self.cantus_firmus)
-        # Pre-determine subdivision pattern for each CF beat
-        random.seed(hash(tuple(cf)))  # deterministic for same CF
-        subdivisions = [random.choice([1, 1, 2, 2, 4]) for _ in range(self.n_beats)]
-        # Ensure first and last are species-1 style (standard practice)
+        random.seed(hash(tuple(cf)))
+        subdivisions: List[int] = [random.choice([1, 1, 2, 2, 4]) for _ in range(self.n_beats)]
         subdivisions[0] = 1
         subdivisions[-1] = 1
 
@@ -835,7 +1120,6 @@ class CounterpointGenerator:
         n_sub = subdivisions[cf_beat]
         prev_pitch = self._solution[-1] if self._solution else None
 
-        # Strong beat must be consonant
         candidates = self.voice_range.candidates(self.scale, prev_pitch)
         for pitch in candidates:
             intv = abs(pitch - cf_note) % 12
@@ -850,7 +1134,6 @@ class CounterpointGenerator:
                 if self._backtrack_species5(cf_beat + 1, subdivisions):
                     return True
             elif n_sub == 2:
-                # Species 2 style: one passing tone
                 passing = self._passing_tone_candidates(pitch)
                 random.shuffle(passing)
                 for p in passing:
@@ -859,7 +1142,6 @@ class CounterpointGenerator:
                         return True
                     self._solution.pop()
             elif n_sub == 4:
-                # Species 3 style: three passing tones
                 if self._gen_florid_passing(cf_beat, subdivisions, 1, pitch):
                     return True
             self._solution.pop()
@@ -884,12 +1166,27 @@ class CounterpointGenerator:
     def _count_species5_constraints(
         self, cf: Sequence[int], cp: List[int], subdivisions: List[int]
     ) -> Tuple[int, int]:
+        """Count constraints for species 5.
+
+        Parameters
+        ----------
+        cf : Sequence[int]
+            Cantus firmus.
+        cp : List[int]
+            Counterpoint (variable length).
+        subdivisions : List[int]
+            Subdivision count per CF beat.
+
+        Returns
+        -------
+        Tuple[int, int]
+            (satisfied, total)
+        """
         total = 0
         sat = 0
         idx = 0
         for cf_beat in range(self.n_beats):
             n_sub = subdivisions[cf_beat]
-            # Strong beat consonance
             intv = abs(cp[idx] - cf[cf_beat]) % 12
             total += 1
             if consonant_interval_class(intv):
@@ -902,6 +1199,7 @@ class CounterpointGenerator:
     # -----------------------------------------------------------------------
 
     def _infeasible_result(self) -> CounterpointResult:
+        """Return a result indicating no feasible solution was found."""
         return CounterpointResult(
             voices=[list(self.cantus_firmus)],
             species=int(self.species),
@@ -927,15 +1225,31 @@ class CounterpointGenerator:
         Parameters
         ----------
         n_voices : int
-            Total number of voices (including cantus firmus).
+            Total number of voices (including cantus firmus). Must be ≥ 1.
         voice_ranges : List[VoiceRange], optional
-            Range for each generated voice. Defaults to VoiceRange().
+            Range for each generated voice (indices 1..n_voices-1).
+            Defaults to VoiceRange() for each.
 
         Returns
         -------
         CounterpointResult
             Typed result with voices and constraint stats.
+
+        Raises
+        ------
+        ValueError
+            If n_voices < 1.
+
+        Example
+        -------
+        >>> gen = CounterpointGenerator(cantus_firmus=[60, 62, 64])
+        >>> result = gen.generate_n_voices(4)
+        >>> result.n_voices
+        4
         """
+        if n_voices < 1:
+            raise ValueError(f"n_voices must be >= 1, got {n_voices}")
+
         if n_voices < 2:
             return CounterpointResult(
                 voices=[list(self.cantus_firmus)],
@@ -947,11 +1261,9 @@ class CounterpointGenerator:
 
         self._graph = CounterpointGraph(n_voices)
         if not self._graph.verify_rigidity():
-            # Force Laman construction
             self._graph.edges = self._graph.edges[:self._graph.expected_edges()]
-            # Re-verify
             if not self._graph.verify_rigidity():
-                pass  # Continue anyway; user may want non-Laman
+                pass
 
         voices: List[List[int]] = [list(self.cantus_firmus)]
         ranges = voice_ranges or [VoiceRange() for _ in range(n_voices - 1)]
@@ -999,6 +1311,20 @@ class CounterpointGenerator:
     def _count_pair_constraints(
         self, voice_a: Sequence[int], voice_b: Sequence[int], beats: List[int]
     ) -> Tuple[int, int]:
+        """Count constraints between a pair of voices.
+
+        Parameters
+        ----------
+        voice_a, voice_b : Sequence[int]
+            Two voices to check.
+        beats : List[int]
+            Beat indices to evaluate.
+
+        Returns
+        -------
+        Tuple[int, int]
+            (satisfied, total)
+        """
         total = 0
         satisfied = 0
         for constraint in self.constraints:
@@ -1030,7 +1356,33 @@ class CounterpointGenerator:
 
 
 class _MultiVoiceGenerator:
-    """Internal backtracker for a single new voice against multiple fixed voices."""
+    """Internal backtracker for a single new voice against multiple fixed voices.
+
+    Parameters
+    ----------
+    fixed_voices : List[List[int]]
+        Previously generated voices.
+    neighbor_indices : List[int]
+        Indices into fixed_voices to check constraints against.
+    scale : Scale
+        Scale for pitch candidates.
+    voice_range : VoiceRange
+        Allowed range for the new voice.
+    constraints : List[Callable[..., str]]
+        Active constraints.
+    n_beats : int
+        Number of beats to generate.
+    """
+
+    __slots__ = (
+        "fixed_voices",
+        "neighbor_indices",
+        "scale",
+        "voice_range",
+        "constraints",
+        "n_beats",
+        "_solution",
+    )
 
     def __init__(
         self,
@@ -1040,7 +1392,7 @@ class _MultiVoiceGenerator:
         voice_range: VoiceRange,
         constraints: List[Callable[..., str]],
         n_beats: int,
-    ):
+    ) -> None:
         self.fixed_voices = fixed_voices
         self.neighbor_indices = neighbor_indices
         self.scale = scale
@@ -1096,6 +1448,13 @@ class _MultiVoiceGenerator:
         return True
 
     def generate(self) -> Optional[List[int]]:
+        """Generate a new voice satisfying all constraints.
+
+        Returns
+        -------
+        List[int] or None
+            The generated voice, or None if no solution exists.
+        """
         self._solution = []
         if self._backtrack(0):
             return list(self._solution)

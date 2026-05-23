@@ -16,7 +16,7 @@ from typing import Dict, List, Set, Tuple
 from constraint_theory_core.rigidity import henneberg_construct as _core_henneberg_construct, is_laman
 
 
-@dataclass
+@dataclass(slots=True)
 class CounterpointGraph:
     """A Laman graph representing contrapuntal constraints among voices.
 

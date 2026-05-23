@@ -20,7 +20,9 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Artistic Software",
+    "Typing :: Typed",
 ]
 
 dependencies = [
@@ -29,7 +31,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff>=0.1.0", "mypy>=1.0"]
+dev = [
+    "pytest>=7.0",
+    "hypothesis>=6.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+]
+midi = [
+    "mido>=1.2",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -38,3 +48,8 @@ include = ["counterpoint_engine*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "stress: marks stress tests (deselect with '-m \"not stress\"')",
+    "benchmark: marks benchmark tests",
+]

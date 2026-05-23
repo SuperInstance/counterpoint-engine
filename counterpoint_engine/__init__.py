@@ -36,6 +36,18 @@ from .tensor_output import (
     voices_to_tensor_events,
     voice_leading_to_sidechannels,
 )
+from .exceptions import (
+    CounterpointError,
+    ConstraintViolationError,
+    ParallelFifthsError,
+    ParallelOctavesError,
+    VoiceCrossingError,
+    RangeViolationError,
+    ResolutionError,
+    LeapViolationError,
+    InvalidInputError,
+    GenerationError,
+)
 
 __version__ = "0.1.0"
 
@@ -64,6 +76,17 @@ __all__ = [
     "TensorMIDIEvent",
     "voices_to_tensor_events",
     "voice_leading_to_sidechannels",
+    # Exceptions
+    "CounterpointError",
+    "ConstraintViolationError",
+    "ParallelFifthsError",
+    "ParallelOctavesError",
+    "VoiceCrossingError",
+    "RangeViolationError",
+    "ResolutionError",
+    "LeapViolationError",
+    "InvalidInputError",
+    "GenerationError",
     # Meta
     "__version__",
 ]

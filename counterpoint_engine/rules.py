@@ -24,11 +24,24 @@ from constraint_theory_core.rigidity import is_laman
 # FLUX result type
 # ---------------------------------------------------------------------------
 
+
 class Satisfiability(str, Enum):
-    """Satisfiability result for constraint checking."""
+    """Satisfiability result for constraint checking.
+
+    Attributes
+    ----------
+    SAT : str
+        Constraint is satisfied.
+    UNSAT : str
+        Constraint is violated.
+    UNKNOWN : str
+        Constraint could not be evaluated.
+    """
+
     SAT = "SAT"
     UNSAT = "UNSAT"
     UNKNOWN = "UNKNOWN"
+
 
 SAT: Satisfiability = Satisfiability.SAT
 UNSAT: Satisfiability = Satisfiability.UNSAT
@@ -76,24 +89,93 @@ TONIC: int = 0  # pitch class of tonic (C in C major)
 # ---------------------------------------------------------------------------
 
 def _pitch_class(pitch: int) -> int:
-    """Return pitch class 0-11 from a MIDI note or pitch class."""
+    """Return pitch class 0-11 from a MIDI note or pitch class.
+
+    Parameters
+    ----------
+    pitch : int
+        MIDI note number or pitch class.
+
+    Returns
+    -------
+    int
+        Pitch class in range 0-11.
+
+    Example
+    -------
+    >>> _pitch_class(60)
+    0
+    >>> _pitch_class(63)
+    3
+    """
     return pitch % 12
 
 
 def _interval_at(voice_a: Sequence[int], voice_b: Sequence[int], beat: int) -> int:
-    """Absolute interval in semitones between two voices at a beat."""
+    """Absolute interval in semitones between two voices at a beat.
+
+    Parameters
+    ----------
+    voice_a, voice_b : Sequence[int]
+        Pitch sequences.
+    beat : int
+        Index into both sequences.
+
+    Returns
+    -------
+    int
+        Absolute semitone distance.
+
+    Raises
+    ------
+    IndexError
+        If *beat* is out of range for either voice.
+    """
     return abs(voice_a[beat] - voice_b[beat])
 
 
 def _interval_class_at(voice_a: Sequence[int], voice_b: Sequence[int], beat: int) -> int:
-    """Interval class (mod 12) between two voices at a beat."""
+    """Interval class (mod 12) between two voices at a beat.
+
+    Parameters
+    ----------
+    voice_a, voice_b : Sequence[int]
+        Pitch sequences.
+    beat : int
+        Index into both sequences.
+
+    Returns
+    -------
+    int
+        Interval class 0-11.
+
+    Raises
+    ------
+    IndexError
+        If *beat* is out of range for either voice.
+    """
     return abs(_pitch_class(voice_a[beat]) - _pitch_class(voice_b[beat]))
 
 
 def _motion_type(
-    voice_a: Sequence[int], voice_b: Sequence[int], beat: int
+    voice_a: Sequence[int],
+    voice_b: Sequence[int],
+    beat: int,
 ) -> str:
-    """Return motion type between beat-1 and beat: 'similar', 'contrary', 'oblique', 'static'."""
+    """Classify the motion between two voices from beat-1 to beat.
+
+    Parameters
+    ----------
+    voice_a, voice_b : Sequence[int]
+        Pitch sequences.
+    beat : int
+        Beat index (motion from beat-1 → beat).
+
+    Returns
+    -------
+    str
+        One of ``'similar'``, ``'contrary'``, ``'oblique'``, ``'static'``.
+    """
     if beat == 0:
         return "static"
     da = voice_a[beat] - voice_a[beat - 1]
@@ -132,7 +214,15 @@ def no_parallel_fifths(
 
     Returns
     -------
-    SAT or UNSAT
+    str
+        ``SAT`` if no parallel fifths are found, ``UNSAT`` otherwise.
+
+    Example
+    -------
+    >>> no_parallel_fifths([60, 62], [67, 69], [0, 1])
+    'UNSAT'
+    >>> no_parallel_fifths([60, 60], [67, 69], [0, 1])
+    'SAT'
     """
     if len(beats) < 2:
         return SAT
@@ -168,7 +258,13 @@ def no_parallel_octaves(
 
     Returns
     -------
-    SAT or UNSAT
+    str
+        ``SAT`` if no parallel octaves are found, ``UNSAT`` otherwise.
+
+    Example
+    -------
+    >>> no_parallel_octaves([60, 62], [72, 74], [0, 1])
+    'UNSAT'
     """
     if len(beats) < 2:
         return SAT
@@ -213,7 +309,16 @@ def proper_resolution(
 
     Returns
     -------
-    SAT or UNSAT
+    str
+        ``SAT`` if the leading tone resolves correctly or is absent,
+        ``UNSAT`` if it fails to resolve.
+
+    Example
+    -------
+    >>> proper_resolution([71, 72], 1)
+    'SAT'
+    >>> proper_resolution([71, 69], 1)
+    'UNSAT'
     """
     if beat == 0:
         return SAT
@@ -246,7 +351,15 @@ def max_leap_seventh(
 
     Returns
     -------
-    SAT or UNSAT
+    str
+        ``SAT`` if the leap is within bounds, ``UNSAT`` otherwise.
+
+    Example
+    -------
+    >>> max_leap_seventh([60, 64], 1)
+    'SAT'
+    >>> max_leap_seventh([60, 71], 1)
+    'UNSAT'
     """
     if beat == 0:
         return SAT
@@ -285,7 +398,15 @@ def consonant_interval(
 
     Returns
     -------
-    SAT or UNSAT
+    str
+        ``SAT`` if the interval is in the allowed set, ``UNSAT`` otherwise.
+
+    Example
+    -------
+    >>> consonant_interval([60], [64], 0)
+    'SAT'
+    >>> consonant_interval([60], [66], 0)
+    'UNSAT'
     """
     int_class = _interval_class_at(voice_a, voice_b, beat)
     if int_class not in allowed:
@@ -308,7 +429,13 @@ def voice_independence(laman_check: bool) -> str:
 
     Returns
     -------
-    SAT or UNSAT
+    str
+        ``SAT`` if the graph is Laman, ``UNSAT`` otherwise.
+
+    Example
+    -------
+    >>> voice_independence(True)
+    'SAT'
     """
     return SAT if laman_check else UNSAT
 
@@ -318,12 +445,50 @@ def voice_independence(laman_check: bool) -> str:
 # ---------------------------------------------------------------------------
 
 def is_step(a: int, b: int) -> bool:
-    """Return True if the motion from a to b is stepwise (1 or 2 semitones)."""
+    """Return True if the motion from *a* to *b* is stepwise (1 or 2 semitones).
+
+    Parameters
+    ----------
+    a : int
+        Starting pitch.
+    b : int
+        Target pitch.
+
+    Returns
+    -------
+    bool
+        True when the absolute difference is 1 or 2 and the pitches differ.
+
+    Example
+    -------
+    >>> is_step(60, 62)
+    True
+    >>> is_step(60, 63)
+    False
+    """
     return abs(a - b) <= 2 and a != b
 
 
 def consonant_interval_class(interval: int) -> bool:
-    """Check if an interval class (0-11) is consonant."""
+    """Check if an interval class (0-11) is consonant.
+
+    Parameters
+    ----------
+    interval : int
+        Interval class to check (will be taken mod 12).
+
+    Returns
+    -------
+    bool
+        True if the interval is a perfect or imperfect consonance.
+
+    Example
+    -------
+    >>> consonant_interval_class(7)
+    True
+    >>> consonant_interval_class(6)
+    False
+    """
     return interval % 12 in CONSONANT_INTERVALS
 
 
@@ -336,8 +501,18 @@ def passing_tone_ok(
     A passing tone must be approached by step and left by step
     in the same direction.
 
-    Returns SAT if the note is consonant (no check needed) or is a
-    valid passing tone. Returns UNSAT otherwise.
+    Parameters
+    ----------
+    counterpoint : Sequence[int]
+        The counterpoint voice.
+    idx : int
+        Index of the note to check.
+
+    Returns
+    -------
+    str
+        ``SAT`` if the note is consonant (no check needed) or is a
+        valid passing tone. ``UNSAT`` otherwise.
     """
     if idx == 0 or idx >= len(counterpoint) - 1:
         return SAT  # boundary notes exempt
@@ -364,6 +539,18 @@ def cambiata_ok(
     Cambiata: dissonance on weak beat approached by step (down),
     followed by a skip of a 3rd in the same direction, then
     resolution by step in opposite direction.
+
+    Parameters
+    ----------
+    counterpoint : Sequence[int]
+        The counterpoint voice.
+    idx : int
+        Index of the note to check.
+
+    Returns
+    -------
+    str
+        ``SAT`` if the cambiata pattern is valid, ``UNSAT`` otherwise.
     """
     if idx < 1 or idx >= len(counterpoint) - 1:
         return SAT
@@ -385,6 +572,20 @@ def suspension_preparation(
     """Check that a suspension is properly prepared.
 
     The note tied into the strong beat must be consonant with the CF.
+
+    Parameters
+    ----------
+    counterpoint : Sequence[int]
+        The counterpoint voice.
+    cf_note : int
+        The cantus firmus note at the same beat.
+    idx : int
+        Index of the suspension note.
+
+    Returns
+    -------
+    str
+        ``SAT`` if the preparation is consonant, ``UNSAT`` otherwise.
     """
     if idx < 1 or idx >= len(counterpoint):
         return SAT
@@ -402,6 +603,18 @@ def suspension_resolution(
 
     The dissonant suspension on the strong beat must resolve
     downward by step to a consonance.
+
+    Parameters
+    ----------
+    counterpoint : Sequence[int]
+        The counterpoint voice.
+    idx : int
+        Index of the suspension note.
+
+    Returns
+    -------
+    str
+        ``SAT`` if the resolution is stepwise down, ``UNSAT`` otherwise.
     """
     if idx < 1 or idx >= len(counterpoint):
         return SAT
