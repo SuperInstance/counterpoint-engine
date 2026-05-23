@@ -286,12 +286,17 @@ def proper_resolution(
     beat: int,
     key_tonic: int = TONIC,
     key_leading: int = LEADING_TONE,
+    scale_pitch_classes: Sequence[int] | None = None,
 ) -> str:
     """Check that a leading tone resolves to the tonic at the given beat.
 
     In tonal counterpoint, the leading tone (scale degree 7) must
     resolve upward by semitone to the tonic (scale degree 1) when
     it appears at a weak beat preceding a strong beat.
+
+    In harmonic minor, the raised 7th creates a leading tone that
+    MUST resolve upward to the tonic. This is the key distinction
+    from natural minor (Aeolian), which lacks a leading tone.
 
     We check: if voice[beat-1] is the leading tone, then voice[beat]
     must be the tonic (or its octave).
@@ -306,6 +311,9 @@ def proper_resolution(
         Pitch class of the tonic.
     key_leading : int, default 11
         Pitch class of the leading tone.
+    scale_pitch_classes : Sequence[int] or None, optional
+        If provided, only enforce resolution when the leading tone is
+        actually in the scale (supports harmonic vs natural minor).
 
     Returns
     -------
@@ -324,6 +332,10 @@ def proper_resolution(
         return SAT
     prev_pc = _pitch_class(voice[beat - 1])
     curr_pc = _pitch_class(voice[beat])
+    # If scale_pitch_classes given, only enforce for notes in the scale
+    if scale_pitch_classes is not None:
+        if prev_pc not in scale_pitch_classes:
+            return SAT
     if prev_pc == key_leading and curr_pc != key_tonic:
         return UNSAT
     return SAT
@@ -381,11 +393,16 @@ def consonant_interval(
     voice_b: Sequence[int],
     beat: int,
     allowed: Tuple[int, ...] = CONSONANT_INTERVALS,
+    total_beats: int | None = None,
 ) -> str:
     """Check that the interval between two voices at beat is consonant.
 
     In first-species counterpoint, only perfect and imperfect consonances
     are allowed on strong beats.
+
+    Following Fux's rules, unisons are only allowed at the first and last
+    beats of the exercise. On interior beats, a unison is rejected even
+    though it is technically consonant.
 
     Parameters
     ----------
@@ -395,6 +412,9 @@ def consonant_interval(
         Beat index to check.
     allowed : tuple of int
         Allowed interval classes in semitones.
+    total_beats : int or None, optional
+        Total number of beats in the exercise. If provided, enables
+        the Fux unison restriction (unisons only at first/last beat).
 
     Returns
     -------
@@ -411,6 +431,10 @@ def consonant_interval(
     int_class = _interval_class_at(voice_a, voice_b, beat)
     if int_class not in allowed:
         return UNSAT
+    # Fux rule: unisons only at first and last beat
+    if int_class == 0 and total_beats is not None and total_beats > 1:
+        if beat != 0 and beat != total_beats - 1:
+            return UNSAT
     return SAT
 
 
@@ -440,9 +464,132 @@ def voice_independence(laman_check: bool) -> str:
     return SAT if laman_check else UNSAT
 
 
+def contrary_motion_score(
+    voice_a: Sequence[int],
+    voice_b: Sequence[int],
+    beats: Sequence[int],
+) -> float:
+    """Score the proportion of contrary motion between two voices.
+
+    Contrary motion is the #1 principle of good voice leading.
+    Voices moving in opposite directions maintain independence
+    better than similar or parallel motion.
+
+    This is a soft constraint / scoring function, not a hard SAT/UNSAT
+    rule. Use it to rank candidate solutions during generation.
+
+    Parameters
+    ----------
+    voice_a, voice_b : Sequence[int]
+        Pitch sequences.
+    beats : Sequence[int]
+        Beat indices to evaluate.
+
+    Returns
+    -------
+    float
+        Score between 0.0 and 1.0 representing the proportion of
+        contrary-motion beats. Higher is better.
+
+    Example
+    -------
+    >>> # Contrary motion at both beats
+    >>> contrary_motion_score([60, 62], [67, 65], [0, 1])
+    1.0
+    >>> # Similar motion at one beat
+    >>> contrary_motion_score([60, 62], [64, 66], [0, 1])
+    0.0
+    """
+    if len(beats) < 2:
+        return 0.0
+    contrary = 0
+    total = 0
+    for beat in beats:
+        motion = _motion_type(voice_a, voice_b, beat)
+        if motion == "static":
+            continue
+        total += 1
+        if motion == "contrary":
+            contrary += 1
+    if total == 0:
+        return 0.0
+    return contrary / total
+
+
+def contrary_motion_bonus(
+    voice_a: Sequence[int],
+    voice_b: Sequence[int],
+    beat: int,
+) -> int:
+    """Return a positive bonus when two voices move in contrary motion.
+
+    Used as a weighted scoring rule during generation to prefer
+    contrary motion without making it a hard constraint.
+
+    Parameters
+    ----------
+    voice_a, voice_b : Sequence[int]
+        Pitch sequences.
+    beat : int
+        Beat index to check motion at.
+
+    Returns
+    -------
+    int
+        1 if contrary motion, 0 otherwise.
+
+    Example
+    -------
+    >>> contrary_motion_bonus([60, 62], [67, 65], 1)
+    1
+    >>> contrary_motion_bonus([60, 62], [64, 66], 1)
+    0
+    """
+    if beat == 0:
+        return 0
+    motion = _motion_type(voice_a, voice_b, beat)
+    return 1 if motion == "contrary" else 0
+
+
 # ---------------------------------------------------------------------------
 # Species 2-5 specific constraint helpers
 # ---------------------------------------------------------------------------
+
+def voice_range_invariant(
+    voices: Sequence[Sequence[int]],
+    beat: int,
+) -> str:
+    """Check that lower-numbered voices are not above higher-numbered voices.
+
+    In multi-voice counterpoint, voice crossing destroys the independence
+    of lines. Voice 0 (highest) must stay above voice 1, which must stay
+    above voice 2, etc. This is a hard constraint for correct part-writing.
+
+    Parameters
+    ----------
+    voices : Sequence[Sequence[int]]
+        All voices, ordered from highest (index 0) to lowest.
+    beat : int
+        Beat index to check.
+
+    Returns
+    -------
+    str
+        ``SAT`` if no voice crossing, ``UNSAT`` if a lower voice is
+        above a higher voice at this beat.
+
+    Example
+    -------
+    >>> voice_range_invariant([[72], [60]], 0)
+    'SAT'
+    >>> voice_range_invariant([[60], [72]], 0)
+    'UNSAT'
+    """
+    for i in range(len(voices) - 1):
+        if voices[i][beat] < voices[i + 1][beat]:
+            return UNSAT
+    return SAT
+
 
 def is_step(a: int, b: int) -> bool:
     """Return True if the motion from *a* to *b* is stepwise (1 or 2 semitones).

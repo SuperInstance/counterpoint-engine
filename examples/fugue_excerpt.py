@@ -33,7 +33,7 @@ gen = CounterpointGenerator(
     scale=scale,
 )
 
-print("FUGUE EXCERPT IN D MINOR")
+print("MULTI-VOICE COUNTERPOINT IN D MINOR")
 print("=" * 50)
 print(f"Subject ({len(SUBJECT)} notes): {SUBJECT}")
 print()

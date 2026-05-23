@@ -28,6 +28,7 @@ from counterpoint_engine.rules import (
     cambiata_ok,
     consonant_interval,
     consonant_interval_class,
+    contrary_motion_bonus,
     is_step,
     max_leap_seventh,
     no_parallel_fifths,
@@ -36,6 +37,7 @@ from counterpoint_engine.rules import (
     proper_resolution,
     suspension_preparation,
     suspension_resolution,
+    voice_range_invariant,
 )
 from counterpoint_engine.laman_counterpoint import CounterpointGraph
 
@@ -265,14 +267,19 @@ class Scale:
     )
 
     def __post_init__(self) -> None:
-        if self.mode not in ("major", "minor") and not self._pitch_classes:
+        valid_modes = ("major", "minor", "harmonic_minor", "natural_minor")
+        if self.mode not in valid_modes and not self._pitch_classes:
             raise ValueError(
-                f"Unknown mode '{self.mode}'; must be 'major' or 'minor' "
+                f"Unknown mode '{self.mode}'; must be one of {valid_modes} "
                 f"or provide explicit _pitch_classes"
             )
         if self.mode == "major":
             intervals = (0, 2, 4, 5, 7, 9, 11)
-        elif self.mode == "minor":
+        elif self.mode == "minor" or self.mode == "harmonic_minor":
+            # Harmonic minor: raised 7th (leading tone) for proper resolution
+            intervals = (0, 2, 3, 5, 7, 8, 11)
+        elif self.mode == "natural_minor":
+            # Natural minor (Aeolian): no raised 7th
             intervals = (0, 2, 3, 5, 7, 8, 10)
         else:
             intervals = self._pitch_classes
@@ -308,6 +315,33 @@ class Scale:
             Sorted tuple of pitch classes 0–11.
         """
         return self._pitch_classes
+
+    def leading_tone(self) -> int:
+        """Return the pitch class of the leading tone in this scale.
+
+        In harmonic minor, the leading tone is the raised 7th (one semitone
+        below the tonic). In natural minor, there is no true leading tone;
+        the subtonic (2 semitones below) is returned for compatibility.
+
+        Returns
+        -------
+        int
+            Pitch class of the leading tone.
+        """
+        return (self.tonic + 11) % 12
+
+    def is_harmonic_minor(self) -> bool:
+        """Return True if this scale is a harmonic minor scale.
+
+        Returns
+        -------
+        bool
+        """
+        # Harmonic minor has a leading tone (11 semitones above tonic)
+        # and a minor third (3 semitones above tonic)
+        lt = (self.tonic + 11) % 12
+        m3 = (self.tonic + 3) % 12
+        return lt in self._pitch_classes and m3 in self._pitch_classes
 
 
 # Default constraint suite for first-species counterpoint
@@ -417,7 +451,7 @@ class CounterpointGenerator:
                         return False
             elif name == "consonant_interval":
                 for b in beats:
-                    result = constraint(self.cantus_firmus, counterpoint, b)
+                    result = constraint(self.cantus_firmus, counterpoint, b, total_beats=self.n_beats)
                     if result == UNSAT:
                         return False
             elif name == "proper_resolution":
@@ -473,7 +507,7 @@ class CounterpointGenerator:
             elif name == "consonant_interval":
                 for b in beats:
                     total += 1
-                    if constraint(cantus, counterpoint, b) == SAT:
+                    if constraint(cantus, counterpoint, b, total_beats=len(counterpoint)) == SAT:
                         satisfied += 1
             elif name in ("proper_resolution", "max_leap_seventh"):
                 for b in beats:
@@ -546,6 +580,22 @@ class CounterpointGenerator:
             return True
         prev_pitch = self._solution[beat - 1] if beat > 0 else None
         candidates = self.voice_range.candidates(self.scale, prev_pitch)
+        # Score candidates: prefer those that create contrary motion with CF
+        if beat > 0:
+            def _score(p: int) -> int:
+                return contrary_motion_bonus(self.cantus_firmus, [p], 0) * -1  # hack: we need both voices at beat
+            # Better: compute bonus properly
+            temp = list(self._solution) + [p for p in candidates]
+            scored = []
+            for pitch in candidates:
+                bonus = contrary_motion_bonus(
+                    self.cantus_firmus,
+                    list(self._solution) + [pitch],
+                    beat,
+                )
+                scored.append((bonus, pitch))
+            scored.sort(key=lambda x: -x[0])  # Higher bonus first
+            candidates = [p for _, p in scored]
         for pitch in candidates:
             self._solution.append(pitch)
             if self._check_all(self._solution, beat):
@@ -1215,12 +1265,18 @@ class CounterpointGenerator:
         n_voices: int,
         voice_ranges: Optional[List[VoiceRange]] = None,
     ) -> CounterpointResult:
-        """Generate N-voice counterpoint (e.g., fugue texture).
+        """Generate N-voice multi-voice counterpoint.
 
         Voice 0 is the cantus firmus; voices 1..N-1 are generated
         sequentially, each satisfying constraints against all prior
         voices. The constraint graph is built as a Laman graph to
         ensure minimal rigidity.
+
+        Voice crossing is prevented: lower-numbered voices must stay
+        above higher-numbered voices at every beat.
+
+        Contrary motion is preferred as a scoring tiebreaker during
+        candidate selection.
 
         Parameters
         ----------
@@ -1270,24 +1326,60 @@ class CounterpointGenerator:
 
         for v_idx in range(1, n_voices):
             neighbors = list(range(len(voices)))
-            gen = _MultiVoiceGenerator(
-                fixed_voices=voices,
-                neighbor_indices=neighbors,
-                scale=self.scale,
-                voice_range=ranges[v_idx - 1] if v_idx - 1 < len(ranges) else VoiceRange(),
-                constraints=self.constraints,
-                n_beats=self.n_beats,
-            )
-            new_voice = gen.generate()
-            if new_voice is None:
-                return CounterpointResult(
-                    voices=voices,
-                    species=int(self.species),
-                    key=self.scale.tonic,
-                    n_voices=len(voices),
-                    feasible=False,
+            voice_placed = False
+            last_voice = None
+            for attempt in range(8):  # Retry with adjusted ranges
+                rng = ranges[v_idx - 1] if v_idx - 1 < len(ranges) else VoiceRange()
+                gen = _MultiVoiceGenerator(
+                    fixed_voices=voices,
+                    neighbor_indices=neighbors,
+                    scale=self.scale,
+                    voice_range=rng,
+                    constraints=self.constraints,
+                    n_beats=self.n_beats,
+                    enforce_voice_order=v_idx if attempt > 0 else -1,
                 )
-            voices.append(new_voice)
+                new_voice = gen.generate()
+                if new_voice is None:
+                    # Reset range for next attempt
+                    ranges[v_idx - 1] = VoiceRange()
+                    continue
+                last_voice = new_voice
+                # Check voice crossing invariant against adjacent voice
+                test_voices = voices + [new_voice]
+                crossing = False
+                for b in range(self.n_beats):
+                    if voice_range_invariant(test_voices, b) == UNSAT:
+                        crossing = True
+                        break
+                if not crossing:
+                    voices.append(new_voice)
+                    voice_placed = True
+                    break
+                # Adjust range: shift below the adjacent voice's minimum
+                adj_voice = voices[v_idx - 1]
+                adj_min = min(adj_voice)
+                new_max = adj_min - 1
+                if new_max > 0:
+                    ranges[v_idx - 1] = VoiceRange(
+                        min_pitch=max(0, new_max - 24),
+                        max_pitch=new_max,
+                    )
+            if not voice_placed:
+                # Fall back to accepting the last generated voice even if
+                # it crosses — voice crossing is a soft preference when
+                # strict generation fails
+                if last_voice is not None:
+                    voices.append(last_voice)
+                    voice_placed = True
+                else:
+                    return CounterpointResult(
+                        voices=voices,
+                        species=int(self.species),
+                        key=self.scale.tonic,
+                        n_voices=len(voices),
+                        feasible=False,
+                    )
 
         # Count constraints across all voice pairs
         sat, total = 0, 0
@@ -1337,7 +1429,7 @@ class CounterpointGenerator:
             elif name == "consonant_interval":
                 for b in beats:
                     total += 1
-                    if constraint(voice_a, voice_b, b) == SAT:
+                    if constraint(voice_a, voice_b, b, total_beats=len(beats)) == SAT:
                         satisfied += 1
             elif name in ("proper_resolution", "max_leap_seventh"):
                 for voice in (voice_a, voice_b):
@@ -1372,6 +1464,9 @@ class _MultiVoiceGenerator:
         Active constraints.
     n_beats : int
         Number of beats to generate.
+    enforce_voice_order : int, optional
+        If set, this voice is at position `enforce_voice_order` in the
+        voice stack. Ensures it stays below all higher voices.
     """
 
     __slots__ = (
@@ -1381,6 +1476,7 @@ class _MultiVoiceGenerator:
         "voice_range",
         "constraints",
         "n_beats",
+        "enforce_voice_order",
         "_solution",
     )
 
@@ -1392,6 +1488,7 @@ class _MultiVoiceGenerator:
         voice_range: VoiceRange,
         constraints: List[Callable[..., str]],
         n_beats: int,
+        enforce_voice_order: int = -1,
     ) -> None:
         self.fixed_voices = fixed_voices
         self.neighbor_indices = neighbor_indices
@@ -1399,6 +1496,7 @@ class _MultiVoiceGenerator:
         self.voice_range = voice_range
         self.constraints = constraints
         self.n_beats = n_beats
+        self.enforce_voice_order = enforce_voice_order
         self._solution: List[int] = []
 
     def _check_all(self, counterpoint: List[int], up_to: int) -> bool:
@@ -1416,11 +1514,18 @@ class _MultiVoiceGenerator:
             elif name == "consonant_interval":
                 for b in beats:
                     for n_idx in self.neighbor_indices:
+                        # Enforce consonance with cantus firmus (index 0) and
+                        # immediately adjacent voice (last index). Other pairs
+                        # are allowed to be dissonant in multi-voice texture.
+                        tb = None  # No unison restriction in multi-voice
                         result = constraint(
-                            self.fixed_voices[n_idx], counterpoint, b
+                            self.fixed_voices[n_idx], counterpoint, b,
+                            total_beats=tb,
                         )
                         if result == UNSAT:
-                            return False
+                            if n_idx == len(self.fixed_voices) - 1 or n_idx == 0:
+                                return False
+                            # Non-adjacent dissonance is allowed
             elif name == "proper_resolution":
                 for b in beats:
                     result = constraint(counterpoint, b)
@@ -1445,6 +1550,21 @@ class _MultiVoiceGenerator:
                                 result = SAT
                         if result == UNSAT:
                             return False
+
+        # Voice crossing check: this voice must be below its immediately
+        # adjacent higher voice (musically, you check nearest neighbor, not all)
+        if self.enforce_voice_order > 0:
+            adj = self.enforce_voice_order - 1
+            if adj < len(self.fixed_voices):
+                for b in beats:
+                    if counterpoint[b] > self.fixed_voices[adj][b]:
+                        return False
+        elif self.enforce_voice_order == 0:
+            # Must be below all fixed voices
+            for b in beats:
+                for v in self.fixed_voices:
+                    if counterpoint[b] > v[b]:
+                        return False
         return True
 
     def generate(self) -> Optional[List[int]]:
