@@ -185,6 +185,12 @@ fv = interval_to_flux_vector(7)  # perfect fifth → FluxVector
 
 Data flow: `cantus firmus → generator (backtracking) → voices → tensor_output → TensorMIDIEvent stream`
 
+## Documentation
+
+- [User Guide](docs/USER-GUIDE.md) — Complete usage documentation
+- [Developer Guide](docs/DEVELOPER-GUIDE.md) — Contributing and internals
+- [Examples](examples/) — Working code examples
+
 ## Ecosystem
 
 - **[constraint-theory-core](https://github.com/SuperInstance/constraint-theory-core)** — Laman rigidity, A₂ lattice, dodecet directions
@@ -200,13 +206,14 @@ Data flow: `cantus firmus → generator (backtracking) → voices → tensor_out
 ## Installation
 
 ```bash
-# Clone with dependencies
+pip install counterpoint-engine
+```
+
+Or install from source with dependencies:
+
+```bash
+pip install constraint-theory-core flux-tensor-midi
 git clone https://github.com/SuperInstance/counterpoint-engine.git
-git clone https://github.com/SuperInstance/constraint-theory-core.git
-git clone https://github.com/SuperInstance/flux-tensor-midi.git
-
-export PYTHONPATH="/path/to/constraint-theory-core:/path/to/flux-tensor-midi:$PYTHONPATH"
-
 cd counterpoint-engine
 pip install -e ".[dev]"
 pytest
