@@ -51,6 +51,24 @@ from .exceptions import (
     InvalidInputError,
     GenerationError,
 )
+from . import harmony
+from .harmony import (
+    TonalGraph,
+    TransitionDirection,
+    compute_holonomy,
+    winding_number,
+    classify_progression,
+    HolonomyResult,
+    ProgressionType,
+    Chord,
+    parse_roman,
+    analyze_progression,
+    detect_modulations,
+    score_stability,
+    PROGRESSIONS,
+    analyze_counterpoint_harmony,
+    check_voice_leading_holonomy,
+)
 
 __version__ = "0.1.0"
 
@@ -93,6 +111,23 @@ __all__ = [
     "LeapViolationError",
     "InvalidInputError",
     "GenerationError",
+    # Harmony subpackage
+    "harmony",
+    "TonalGraph",
+    "TransitionDirection",
+    "compute_holonomy",
+    "winding_number",
+    "classify_progression",
+    "HolonomyResult",
+    "ProgressionType",
+    "Chord",
+    "parse_roman",
+    "analyze_progression",
+    "detect_modulations",
+    "score_stability",
+    "PROGRESSIONS",
+    "analyze_counterpoint_harmony",
+    "check_voice_leading_holonomy",
     # Meta
     "__version__",
 ]
