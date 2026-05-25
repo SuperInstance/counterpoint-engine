@@ -11,9 +11,8 @@ Output: TensorMIDIEvent objects compatible with flux-tensor-midi.
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Sequence, Tuple
 
 try:
     from flux_tensor_midi.core.flux import FluxVector

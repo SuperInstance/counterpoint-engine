@@ -103,7 +103,7 @@ def main():
         beat=3,
         side_state=1,   # Smile
     )
-    print(f"\n  from_pitch_interval(pitch=67, interval=7, beat=3):")
+    print("\n  from_pitch_interval(pitch=67, interval=7, beat=3):")
     print(f"    {evt!r}")
     print(f"    Raw bytes: {list(evt.to_bytes())}")
 

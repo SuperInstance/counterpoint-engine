@@ -1,12 +1,9 @@
 """Tests for species 2-5 counterpoint generation."""
 
-import pytest
 
 from counterpoint_engine.generator import (
     CounterpointGenerator,
-    CounterpointResult,
     Species,
-    Scale,
     VoiceRange,
 )
 from counterpoint_engine.rules import (
@@ -16,7 +13,6 @@ from counterpoint_engine.rules import (
     consonant_interval_class,
     is_step,
     passing_tone_ok,
-    cambiata_ok,
 )
 
 

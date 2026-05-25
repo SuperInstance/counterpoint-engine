@@ -8,8 +8,7 @@ Directions encode functional harmonic motion.
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Dict, List, Tuple, Optional
 

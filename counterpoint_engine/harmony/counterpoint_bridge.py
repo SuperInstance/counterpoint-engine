@@ -7,19 +7,13 @@ pitch values) and run holonomy-based tonal analysis on them.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
-from .tonal_graph import TonalGraph, TransitionDirection, semitone_interval
+from .tonal_graph import TonalGraph, semitone_interval
 from .cycle_checker import (
     compute_holonomy,
     HolonomyResult,
     ProgressionType,
-)
-from .analyzer import (
-    analyze_progression,
-    Chord,
-    ProgressionAnalysis,
-    score_stability as _score_stability,
 )
 
 
@@ -31,7 +25,7 @@ def _voices_to_roots(voices: List[List[int]]) -> List[List[int]]:
     """Extract pitch-class roots from each voice (lowest note per chord)."""
     if not voices:
         return []
-    n_steps = len(voices[0])
+    len(voices[0])
     roots: List[List[int]] = []
     for voice in voices:
         roots.append([p % 12 for p in voice])

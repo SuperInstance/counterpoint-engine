@@ -9,17 +9,14 @@ progression on a stability / adventurousness axis.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional
 
 from .tonal_graph import (
     TonalGraph,
-    TransitionDirection,
-    pc_from_name,
     pitch_name,
-    semitone_interval,
 )
-from .cycle_checker import compute_holonomy, HolonomyResult, ProgressionType
+from .cycle_checker import compute_holonomy, HolonomyResult
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +345,6 @@ def _detect_deviations(
     """Detect modulation points and modal interchange points."""
     modulations: List[Tuple[int, str]] = []
     interchanges: List[Tuple[int, str]] = []
-    cumulative = holonomy.cumulative
 
     for i, chord in enumerate(chords):
         if chord.is_secondary_dominant:

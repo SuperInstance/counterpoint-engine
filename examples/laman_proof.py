@@ -61,7 +61,7 @@ def main():
     print(f"\n{cg!r}")
     print(f"  Edge count: {cg.edge_count()} (expected {cg.expected_edges()})")
     print(f"  Minimally rigid: {cg.is_minimally_rigid()}")
-    print(f"\n  Voice pairs and their constraints:")
+    print("\n  Voice pairs and their constraints:")
 
     for edge in cg.edges:
         constraints = cg.constraints.get(edge, [])
@@ -78,7 +78,7 @@ def main():
     cg2.add_constraint(0, 2, "extra_consonance_check")
     print(f"  After adding edge (0,2): {cg2.edge_count()} edges, rigid={cg2.verify_rigidity()}")
     print(f"  Still minimally rigid: {cg2.is_minimally_rigid()}")
-    print(f"  (More edges than 2n-3 → rigid but not *minimally* rigid)")
+    print("  (More edges than 2n-3 → rigid but not *minimally* rigid)")
 
     # ── Subsetting: remove an edge ──────────────────────────────────────────
     print(f"\n{'─' * 50}")
@@ -91,7 +91,7 @@ def main():
     reduced = edges_3[:-1]
     print(f"  After removing last edge: {reduced}, rigid={verify_rigidity(3, reduced)}")
 
-    print(f"\n✓ Laman rigidity verified for voice counts 2–5.")
+    print("\n✓ Laman rigidity verified for voice counts 2–5.")
     print("  Counterpoint constraint graphs satisfy the rigidity theorem.")
 
 

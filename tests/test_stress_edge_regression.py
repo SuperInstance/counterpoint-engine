@@ -5,7 +5,6 @@ import pytest
 
 from counterpoint_engine.generator import (
     CounterpointGenerator,
-    CounterpointResult,
     Species,
     Scale,
     VoiceRange,
@@ -13,7 +12,6 @@ from counterpoint_engine.generator import (
 from counterpoint_engine.rules import (
     SAT,
     consonant_interval,
-    consonant_interval_class,
     no_parallel_fifths,
     no_parallel_octaves,
     max_leap_seventh,
@@ -21,7 +19,6 @@ from counterpoint_engine.rules import (
 )
 from counterpoint_engine.exceptions import (
     RangeViolationError,
-    InvalidInputError,
 )
 
 

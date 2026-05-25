@@ -1,6 +1,5 @@
 """Tests for counterpoint_engine.rules — individual FLUX constraints."""
 
-import pytest
 
 from counterpoint_engine.rules import (
     SAT,

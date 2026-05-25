@@ -14,14 +14,11 @@ at a different one.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 from .tonal_graph import (
-    PITCH_CLASSES,
-    pitch_name,
     circle_of_fifths_position,
     semitone_interval,
     TransitionDirection,

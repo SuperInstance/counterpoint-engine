@@ -10,33 +10,24 @@ Output: MIDI file or tensor-midi event stream.
 
 from __future__ import annotations
 
-import math
 import random
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from counterpoint_engine.exceptions import (
-    InvalidInputError,
-    GenerationError,
     RangeViolationError,
 )
 from counterpoint_engine.rules import (
     SAT,
     UNSAT,
-    Satisfiability,
-    cambiata_ok,
     consonant_interval,
     consonant_interval_class,
     contrary_motion_bonus,
-    is_step,
     max_leap_seventh,
     no_parallel_fifths,
     no_parallel_octaves,
-    passing_tone_ok,
     proper_resolution,
-    suspension_preparation,
-    suspension_resolution,
     voice_range_invariant,
 )
 from counterpoint_engine.laman_counterpoint import CounterpointGraph
@@ -585,7 +576,7 @@ class CounterpointGenerator:
             def _score(p: int) -> int:
                 return contrary_motion_bonus(self.cantus_firmus, [p], 0) * -1  # hack: we need both voices at beat
             # Better: compute bonus properly
-            temp = list(self._solution) + [p for p in candidates]
+            list(self._solution) + [p for p in candidates]
             scored = []
             for pitch in candidates:
                 bonus = contrary_motion_bonus(

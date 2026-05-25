@@ -3,15 +3,12 @@
 Uses Hypothesis for automatic test case generation.
 """
 
-import pytest
 from hypothesis import given, settings, assume, HealthCheck
 from hypothesis import strategies as st
 
 from counterpoint_engine.generator import (
     CounterpointGenerator,
-    CounterpointResult,
     Species,
-    Scale,
     VoiceRange,
 )
 from counterpoint_engine.rules import (

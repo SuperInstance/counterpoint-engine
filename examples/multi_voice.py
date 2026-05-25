@@ -12,7 +12,6 @@ Run:  python3 examples/multi_voice.py
 
 from counterpoint_engine import (
     CounterpointGenerator,
-    CounterpointResult,
     Species,
     VoiceRange,
     Scale,
@@ -101,6 +100,6 @@ print(f"Edges: {graph.edges}")
 print(f"Edge count: {graph.edge_count()}")
 print(f"Expected (2n-3): {graph.expected_edges()}")
 print(f"Is minimally rigid: {graph.is_minimally_rigid()}")
-print(f"Constraints per edge:")
+print("Constraints per edge:")
 for edge, names in graph.constraints.items():
     print(f"  {edge}: {names}")

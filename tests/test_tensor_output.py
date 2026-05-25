@@ -1,6 +1,5 @@
 """Tests for counterpoint_engine.tensor_output — tensor-midi conversion."""
 
-import pytest
 
 from counterpoint_engine.tensor_output import (
     TensorMIDIEvent,
@@ -114,7 +113,7 @@ class TestIntervalToFluxVector:
         assert v.magnitude > 0
 
     def test_dissonant_interval_weaker(self):
-        v_cons = interval_to_flux_vector(7)
+        interval_to_flux_vector(7)
         v_diss = interval_to_flux_vector(1)
         # Consonant should have full strength, dissonant half
         # We can't directly compare magnitudes because they map to different channels,

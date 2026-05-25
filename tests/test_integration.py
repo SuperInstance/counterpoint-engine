@@ -1,8 +1,7 @@
 """Integration tests: full pipeline from generation to tensor-midi output."""
 
-import pytest
 
-from counterpoint_engine.generator import CounterpointGenerator, CounterpointResult, Species
+from counterpoint_engine.generator import CounterpointGenerator, CounterpointResult
 from counterpoint_engine.laman_counterpoint import CounterpointGraph
 from counterpoint_engine.tensor_output import (
     voices_to_tensor_events,

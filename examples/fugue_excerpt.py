@@ -90,5 +90,5 @@ if result.feasible:
     print()
     g = CounterpointGraph(result.n_voices)
     print(f"Constraint graph: {g}")
-    print(f"  Every voice pair is independently constrained.")
+    print("  Every voice pair is independently constrained.")
     print(f"  Total constraint edges: {g.edge_count()} (2×{result.n_voices}-3 = {2*result.n_voices-3})")

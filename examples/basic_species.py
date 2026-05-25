@@ -13,7 +13,6 @@ Run:  python3 examples/basic_species.py
 
 from counterpoint_engine import (
     CounterpointGenerator,
-    CounterpointResult,
     Species,
     VoiceRange,
     Scale,

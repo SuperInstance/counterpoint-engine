@@ -7,7 +7,6 @@ d) Voice crossing prevention (voice_range_invariant)
 e) Renamed "fugue" to "multi-voice counterpoint"
 """
 
-import pytest
 
 from counterpoint_engine.rules import (
     SAT,
@@ -20,10 +19,8 @@ from counterpoint_engine.rules import (
 )
 from counterpoint_engine.generator import (
     CounterpointGenerator,
-    CounterpointResult,
     Scale,
     Species,
-    VoiceRange,
 )
 
 
@@ -52,7 +49,7 @@ class TestHarmonicMinor:
     def test_leading_tone_resolves_in_minor(self):
         """In D minor, C# (leading tone) must resolve to D (tonic)."""
         # D minor: tonic=2, leading tone = (2+11)%12 = 1 (C#)
-        d_minor = Scale(tonic=2, mode="minor")
+        Scale(tonic=2, mode="minor")
         # C#(61) should resolve to D(62)
         assert proper_resolution([61, 62], 1, key_tonic=2, key_leading=1) == SAT
         # C#(61) resolving to B(59) should fail

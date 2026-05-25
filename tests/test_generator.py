@@ -1,6 +1,5 @@
 """Tests for counterpoint_engine.generator — constrained generation."""
 
-import pytest
 
 from counterpoint_engine.generator import (
     CounterpointGenerator,

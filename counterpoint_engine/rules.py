@@ -16,7 +16,7 @@ The rules encode the classical species counterpoint constraints:
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Sequence, Tuple
+from typing import Sequence, Tuple
 
 try:
     from constraint_theory_core.rigidity import is_laman
@@ -706,7 +706,7 @@ def cambiata_ok(
         return SAT
     prev = counterpoint[idx - 1]
     curr = counterpoint[idx]
-    nxt = counterpoint[idx + 1]
+    counterpoint[idx + 1]
     # Downward step to dissonance, then skip down, then step up
     direction_in = curr - prev
     if abs(direction_in) <= 2:  # stepwise approach
