@@ -7,7 +7,11 @@ from counterpoint_engine.laman_counterpoint import (
     henneberg_construct,
     verify_rigidity,
 )
-from constraint_theory_core.rigidity import is_laman
+try:
+    from constraint_theory_core.rigidity import is_laman
+except ImportError:
+    is_laman = None
+    is_laman = None
 
 
 class TestCounterpointGraph:
@@ -58,7 +62,10 @@ class TestCounterpointGraph:
 
 class TestHennebergWrapper:
     def test_matches_core(self):
-        from constraint_theory_core.rigidity import henneberg_construct as core_hb
+        try:
+            from constraint_theory_core.rigidity import henneberg_construct as core_hb
+        except ImportError:
+            pytest.skip("constraint-theory-core not installed")
         edges = henneberg_construct(8)
         assert edges == core_hb(8, seed=42)
 

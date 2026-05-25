@@ -15,9 +15,15 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from flux_tensor_midi.core.flux import FluxVector
-from flux_tensor_midi.midi.events import MidiEvent
-from constraint_theory_core.lattice import (
+try:
+    from flux_tensor_midi.core.flux import FluxVector
+    from flux_tensor_midi.midi.events import MidiEvent
+except ImportError:
+    FluxVector = None
+    MidiEvent = None
+
+try:
+    from constraint_theory_core.lattice import (
     A2Point,
     snap,
     encode_dodecet,
@@ -26,6 +32,14 @@ from constraint_theory_core.lattice import (
     vector48_decode,
     DODECET_DIRECTIONS,
 )
+except ImportError:
+    A2Point = None
+    snap = None
+    encode_dodecet = None
+    decode_dodecet = None
+    vector48_encode = None
+    vector48_decode = None
+    DODECET_DIRECTIONS = None
 
 
 # ---------------------------------------------------------------------------

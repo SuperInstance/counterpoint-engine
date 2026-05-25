@@ -18,7 +18,10 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Sequence, Tuple
 
-from constraint_theory_core.rigidity import is_laman
+try:
+    from constraint_theory_core.rigidity import is_laman
+except ImportError:
+    is_laman = None
 
 # ---------------------------------------------------------------------------
 # FLUX result type

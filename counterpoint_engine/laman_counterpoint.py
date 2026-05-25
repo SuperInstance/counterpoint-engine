@@ -13,7 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Tuple
 
-from constraint_theory_core.rigidity import henneberg_construct as _core_henneberg_construct, is_laman
+try:
+    from constraint_theory_core.rigidity import henneberg_construct as _core_henneberg_construct, is_laman
+except ImportError:
+    _core_henneberg_construct = None
+    is_laman = None
 
 
 @dataclass(slots=True)

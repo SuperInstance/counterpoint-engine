@@ -9,7 +9,10 @@ from counterpoint_engine.tensor_output import (
     interval_to_flux_vector,
     voice_intervals_to_flux_vectors,
 )
-from flux_tensor_midi.core.flux import FluxVector
+try:
+    from flux_tensor_midi.core.flux import FluxVector
+except ImportError:
+    FluxVector = None
 
 
 class TestTensorMIDIEvent:
