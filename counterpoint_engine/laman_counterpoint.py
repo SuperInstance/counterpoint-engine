@@ -45,9 +45,23 @@ class CounterpointGraph:
                 f"n_voices must be at least 2, got {self.n_voices}"
             )
         if not self.edges and self.n_voices >= 2:
-            self.edges = _core_henneberg_construct(self.n_voices)
+            if _core_henneberg_construct is not None:
+                self.edges = _core_henneberg_construct(self.n_voices)
+            else:
+                self.edges = self._fallback_henneberg(self.n_voices)
         if not self.constraints:
             self._assign_default_constraints()
+
+    def _fallback_henneberg(self, n: int) -> List[Tuple[int, int]]:
+        """Fallback Henneberg construction without constraint-theory-core.
+        Generates 2n-3 edges for a minimally rigid Laman graph."""
+        edges = [(0, 1)]  # Start with one edge
+        for k in range(2, n):
+            # Add vertex k by connecting to 2 existing vertices
+            edges.append((0, k))
+            edges.append((1, k))
+        # Trim to exactly 2n-3 edges if needed
+        return edges[: 2 * n - 3]
 
     def _assign_default_constraints(self) -> None:
         """Assign standard counterpoint constraints to edges."""
