@@ -11,7 +11,7 @@ from counterpoint_engine.tensor_output import (
 try:
     from flux_tensor_midi.core.flux import FluxVector
 except ImportError:
-    FluxVector = None
+    from counterpoint_engine.tensor_output import FluxVector
 
 
 class TestTensorMIDIEvent:
