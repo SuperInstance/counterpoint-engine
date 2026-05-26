@@ -57,6 +57,10 @@ if FluxVector is None:
     class _FallbackFluxVector:
         direction: int
         magnitude: float = 1.0
+        def __len__(self) -> int:
+            return 2  # direction + magnitude
+        def __getitem__(self, idx: int) -> float:
+            return float(self.direction) if idx == 0 else self.magnitude
     FluxVector = _FallbackFluxVector
 
 
