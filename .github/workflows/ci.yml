@@ -25,6 +25,6 @@ jobs:
       - name: Lint with ruff
         run: ruff check .
       - name: Type check
-        run: mypy src/ --ignore-missing-imports || true
+        run: mypy counterpoint_engine/ --ignore-missing-imports || true
       - name: Run tests
         run: pytest --tb=short -q
