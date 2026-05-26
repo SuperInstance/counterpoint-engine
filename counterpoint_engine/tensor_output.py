@@ -40,6 +40,25 @@ except ImportError:
     vector48_decode = None
     DODECET_DIRECTIONS = None
 
+# Fallback MidiEvent when flux_tensor_midi not installed
+if MidiEvent is None:
+    @dataclass(frozen=True)
+    class _FallbackMidiEvent:
+        note: int
+        velocity: int
+        start_ms: int
+        duration_ms: int
+        channel: int = 0
+    MidiEvent = _FallbackMidiEvent
+
+# Fallback FluxVector when flux_tensor_midi not installed
+if FluxVector is None:
+    @dataclass(frozen=True)
+    class _FallbackFluxVector:
+        direction: int
+        magnitude: float = 1.0
+    FluxVector = _FallbackFluxVector
+
 
 # ---------------------------------------------------------------------------
 # TensorMIDIEvent — the 4-byte phase-state event from the theory
@@ -105,7 +124,14 @@ class TensorMIDIEvent:
         """
         # Map interval (0-11) to one of 12 dodecet directions
         dodecet_idx = interval % 12
-        dir_a, dir_b = DODECET_DIRECTIONS[dodecet_idx]
+        if DODECET_DIRECTIONS is not None:
+            dir_a, dir_b = DODECET_DIRECTIONS[dodecet_idx]
+        else:
+            # Fallback: use sin/cos for 12 directions on unit circle
+            import math
+            angle = dodecet_idx * math.pi / 6
+            dir_a = math.cos(angle)
+            dir_b = math.sin(angle)
         # Scale to INT8 range (roughly)
         cos_i8 = int(dir_a * 60)
         sin_i8 = int(dir_b * 60)

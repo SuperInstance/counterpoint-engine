@@ -137,7 +137,17 @@ def henneberg_construct(n: int, seed: int = 42) -> List[Tuple[int, int]]:
     List[Tuple[int, int]]
         Edges of the constructed Laman graph.
     """
-    return _core_henneberg_construct(n, seed=seed)
+    if _core_henneberg_construct is not None:
+        return _core_henneberg_construct(n, seed=seed)
+    # Fallback: deterministic Henneberg construction
+    import random
+    rng = random.Random(seed)
+    edges = [(0, 1)]
+    for k in range(2, n):
+        a, b = rng.sample(range(k), 2)
+        edges.append((a, k))
+        edges.append((b, k))
+    return edges[:2 * n - 3]
 
 
 def verify_rigidity(n_voices: int, edges: List[Tuple[int, int]]) -> bool:
