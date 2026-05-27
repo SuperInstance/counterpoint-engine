@@ -51,6 +51,21 @@ from .exceptions import (
     InvalidInputError,
     GenerationError,
 )
+from .canon import (
+    CanonVoice,
+    CanonGenerator,
+    CanonResult,
+    make_follower,
+    round_canon,
+    REST,
+)
+from .analysis import (
+    VoiceLeadingScore,
+    SpeciesComplianceReport,
+    CounterpointAnalysis,
+    analyze_voice_leading,
+    score_counterpoint,
+)
 from . import harmony
 from .harmony import (
     TonalGraph,
@@ -128,6 +143,19 @@ __all__ = [
     "PROGRESSIONS",
     "analyze_counterpoint_harmony",
     "check_voice_leading_holonomy",
+    # Canon
+    "CanonVoice",
+    "CanonGenerator",
+    "CanonResult",
+    "make_follower",
+    "round_canon",
+    "REST",
+    # Analysis
+    "VoiceLeadingScore",
+    "SpeciesComplianceReport",
+    "CounterpointAnalysis",
+    "analyze_voice_leading",
+    "score_counterpoint",
     # Meta
     "__version__",
 ]
