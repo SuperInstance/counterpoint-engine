@@ -18,12 +18,11 @@ itself.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Sequence
 
 from counterpoint_engine.rules import (
     SAT,
-    CONSONANT_INTERVALS,
     consonant_interval_class,
     contrary_motion_score,
     is_step,

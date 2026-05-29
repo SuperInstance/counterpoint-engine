@@ -8,7 +8,7 @@ from counterpoint_engine.canon import (
     make_follower,
     round_canon,
 )
-from counterpoint_engine.generator import Scale, VoiceRange
+from counterpoint_engine.generator import VoiceRange
 
 
 # Simple leader melodies
