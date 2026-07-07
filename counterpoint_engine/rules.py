@@ -223,9 +223,9 @@ def no_parallel_fifths(
     Example
     -------
     >>> no_parallel_fifths([60, 62], [67, 69], [0, 1])
-    'UNSAT'
+    <Satisfiability.UNSAT: 'UNSAT'>
     >>> no_parallel_fifths([60, 60], [67, 69], [0, 1])
-    'SAT'
+    <Satisfiability.SAT: 'SAT'>
     """
     if len(beats) < 2:
         return SAT
@@ -267,7 +267,7 @@ def no_parallel_octaves(
     Example
     -------
     >>> no_parallel_octaves([60, 62], [72, 74], [0, 1])
-    'UNSAT'
+    <Satisfiability.UNSAT: 'UNSAT'>
     """
     if len(beats) < 2:
         return SAT
@@ -327,9 +327,9 @@ def proper_resolution(
     Example
     -------
     >>> proper_resolution([71, 72], 1)
-    'SAT'
+    <Satisfiability.SAT: 'SAT'>
     >>> proper_resolution([71, 69], 1)
-    'UNSAT'
+    <Satisfiability.UNSAT: 'UNSAT'>
     """
     if beat == 0:
         return SAT
@@ -372,9 +372,9 @@ def max_leap_seventh(
     Example
     -------
     >>> max_leap_seventh([60, 64], 1)
-    'SAT'
+    <Satisfiability.SAT: 'SAT'>
     >>> max_leap_seventh([60, 71], 1)
-    'UNSAT'
+    <Satisfiability.UNSAT: 'UNSAT'>
     """
     if beat == 0:
         return SAT
@@ -427,9 +427,9 @@ def consonant_interval(
     Example
     -------
     >>> consonant_interval([60], [64], 0)
-    'SAT'
+    <Satisfiability.SAT: 'SAT'>
     >>> consonant_interval([60], [66], 0)
-    'UNSAT'
+    <Satisfiability.UNSAT: 'UNSAT'>
     """
     int_class = _interval_class_at(voice_a, voice_b, beat)
     if int_class not in allowed:
@@ -462,7 +462,7 @@ def voice_independence(laman_check: bool) -> str:
     Example
     -------
     >>> voice_independence(True)
-    'SAT'
+    <Satisfiability.SAT: 'SAT'>
     """
     return SAT if laman_check else UNSAT
 
@@ -584,9 +584,9 @@ def voice_range_invariant(
     Example
     -------
     >>> voice_range_invariant([[72], [60]], 0)
-    'SAT'
+    <Satisfiability.SAT: 'SAT'>
     >>> voice_range_invariant([[60], [72]], 0)
-    'UNSAT'
+    <Satisfiability.UNSAT: 'UNSAT'>
     """
     for i in range(len(voices) - 1):
         if voices[i][beat] < voices[i + 1][beat]:

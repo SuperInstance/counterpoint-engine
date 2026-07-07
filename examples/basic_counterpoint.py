@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 basic_counterpoint.py — Generate first-species counterpoint above a cantus firmus.
-
 Run:  python3 examples/basic_counterpoint.py
 
 Demonstrates:
@@ -56,11 +55,13 @@ def main():
     )
     print(f"\n{gen!r}")
 
-    counterpoint = gen.generate()
+    result = gen.generate()
 
-    if counterpoint is None:
+    if not result.feasible:
         print("\nNo valid counterpoint found (constraints too strict for this CF).")
         return
+
+    counterpoint = result.voices[1]
 
     # ── Display results ─────────────────────────────────────────────────────
     cp_names = [midi_to_name(p) for p in counterpoint]
@@ -91,7 +92,7 @@ def main():
     print("  ─────────────────────────────────────────")
     print("  Cantus firmus (lower): ", "  ".join(f"{n:>3}" for n in cf_names))
 
-    print(f"\n✓ Generated {len(counterpoint)} notes of counterpoint above the cantus firmus.")
+    print(f"\nGenerated {len(counterpoint)} notes of counterpoint above the cantus firmus.")
 
 
 if __name__ == "__main__":

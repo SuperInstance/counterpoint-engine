@@ -42,14 +42,15 @@ def main():
         cantus_firmus=cantus_firmus,
         species=Species.FIRST,
     )
-    counterpoint = gen.generate()
+    result = gen.generate()
 
-    if counterpoint is None:
+    if not result.feasible:
         print("No counterpoint found — try a different cantus firmus.")
         return
 
-    print(f"Counterpoint:  {counterpoint}")
-    voices = [cantus_firmus, counterpoint]
+    voices = result.voices
+    print(f"Result:        {result}")
+    print(f"Counterpoint:  {voices[1]}")
 
     # ── Convert to TensorMIDIEvents ────────────────────────────────────────
     print(f"\n{'─' * 50}")
@@ -107,7 +108,7 @@ def main():
     print(f"    {evt!r}")
     print(f"    Raw bytes: {list(evt.to_bytes())}")
 
-    print(f"\n✓ Generated {len(tensor_events)} tensor events from {len(voices)} voices × {n_beats} beats.")
+    print(f"\nGenerated {len(tensor_events)} tensor events from {len(voices)} voices × {n_beats} beats.")
 
 
 if __name__ == "__main__":
